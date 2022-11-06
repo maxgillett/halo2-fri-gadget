@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_09_10" }
-halo2_gadgets = {git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_09_10" }
-halo2_base = { package = "halo2_base", git = "https://github.com/axiom-crypto/halo2-lib.git" }
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_10_22" }
+halo2_gadgets = {git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_10_22" }
+halo2_base = { git = "https://github.com/axiom-crypto/halo2-base.git", branch = "poseidon" }
 halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = 'v0.2.0' }
 halo2_merkle_tree = { path = "../halo2-merkle-tree" }
 

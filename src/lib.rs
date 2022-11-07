@@ -15,14 +15,16 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
+use halo2_proofs::halo2curves::bn256::Fr;
+
 // FRI PROTOCOL PARAMS
 // =========================================================================
 
 #[allow(unused)]
 #[derive(Default)]
-struct FriProof<F: FieldExt, H: Hasher> {
-    pub layer_commitments: Vec<H::Digest>,
-    pub queries: Vec<FriQuery<F, H>>,
+struct FriProof<F: FieldExt> {
+    pub layer_commitments: Vec<Digest>,
+    pub queries: Vec<FriQuery<F>>, //, H>>,
     pub options: FriOptions,
 }
 
@@ -35,9 +37,9 @@ struct FriOptions {
 }
 
 #[allow(unused)]
-struct FriQuery<F: FieldExt, H: Hasher> {
+struct FriQuery<F: FieldExt> {
     pub evaluations: Vec<F>,
-    pub merkle_proof: Vec<H::Digest>, // siblings
+    pub merkle_proof: Vec<Digest>, // siblings
 }
 
 // HASH FUNCTIONS
@@ -69,13 +71,13 @@ impl Hasher for Poseidon {
 // HASHER CHIP
 // =========================================================================
 
-trait HasherChip: Clone {
-    type Hasher: Hasher + Clone + Default;
-    type Config: Clone;
+type Digest = [u8; 32];
 
-    fn from_config(config: Self::Config) -> Self;
-    fn configure<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self::Config;
-    fn hash<F: FieldExt>(
+trait HasherChip<F: FieldExt>: Clone {
+    //type Digest;
+
+    fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self;
+    fn hash(
         &self,
         ctx: &mut Context<'_, F>,
         values: &[AssignedValue<F>],
@@ -93,17 +95,14 @@ struct PoseidonChip {
 }
 
 #[allow(unused)]
-impl HasherChip for PoseidonChip {
-    type Hasher = Poseidon;
-    type Config = PoseidonChipConfig;
+impl<F: FieldExt> HasherChip<F> for PoseidonChip {
+    //type Digest = F;
 
-    fn from_config(config: Self::Config) -> Self {
+    fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self {
         Self {}
     }
-    fn configure<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        Self::Config {}
-    }
-    fn hash<F: FieldExt>(
+
+    fn hash(
         &self,
         ctx: &mut Context<'_, F>,
         values: &[AssignedValue<F>],
@@ -116,77 +115,66 @@ impl HasherChip for PoseidonChip {
 // =========================================================================
 
 #[allow(dead_code)]
-#[derive(Clone)]
-struct MerkleTreeChipConfig<F: FieldExt, H: HasherChip> {
-    hasher_config: H::Config,
-    _marker: PhantomData<F>,
+struct MerkleTreeChip<F: FieldExt, H: HasherChip<F>> {
+    _marker: PhantomData<(F, H)>,
 }
 
-#[allow(dead_code)]
-struct MerkleTreeChip<F: FieldExt, H: HasherChip> {
-    config: MerkleTreeChipConfig<F, H>,
-    _marker: PhantomData<F>,
-}
-
-impl<F: FieldExt, H: HasherChip> MerkleTreeChip<F, H> {
-    fn configure(meta: &mut ConstraintSystem<F>) -> MerkleTreeChipConfig<F, H> {
-        MerkleTreeChipConfig {
-            hasher_config: H::configure(meta),
+impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
+    fn new(ctx: &mut Context<F>, chip: &FlexGateConfig<F>) -> Self {
+        Self {
             _marker: PhantomData,
         }
+    }
+
+    // TODO: Make root, proof, and leaf generic
+    fn verify_merkle_proof(
+        ctx: &mut Context<'_, F>,
+        root: AssignedValue<F>,
+        proof: Vec<AssignedValue<F>>,
+        leaf: AssignedValue<F>,
+        index: AssignedValue<F>,
+    ) -> Result<(), Error> {
+        //for sibling in proof {}
+        unimplemented!()
     }
 }
 
 // RANDOM COIN CHIP
 // =========================================================================
 
-trait RandomCoinChip<F: FieldExt, H: HasherChip>: Clone {
-    //type Config: Clone;
-
-    fn from_config(
-        config: RandomCoinConfig<F, H>,
+trait RandomCoinChip<F: FieldExt, H: HasherChip<F>>: Clone {
+    fn new(
+        ctx: &mut Context<'_, F>,
+        flex_gate: &FlexGateConfig<F>,
         seed: AssignedValue<F>,
         counter: AssignedValue<F>,
     ) -> Self;
-    fn configure(meta: &mut ConstraintSystem<F>) -> RandomCoinConfig<F, H>;
+
     fn draw_alpha(
         &mut self,
         ctx: &mut Context<'_, F>,
+        chip: &FlexGateConfig<F>,
         commitment: AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error>;
 }
 
 #[derive(Clone)]
-struct RandomCoinConfig<F: FieldExt, H: HasherChip> {
-    pub hasher_config: H::Config,
-    _marker: PhantomData<F>,
-}
-
-#[derive(Clone)]
-struct RandomCoin<F: FieldExt, H: HasherChip> {
-    config: RandomCoinConfig<F, H>,
+struct RandomCoin<F: FieldExt, H: HasherChip<F>> {
     pub seed: AssignedValue<F>,
     pub counter: AssignedValue<F>,
+    _marker: PhantomData<H>,
 }
 
-impl<F: FieldExt, H: HasherChip> RandomCoinChip<F, H> for RandomCoin<F, H> {
-    //type Config = RandomCoinConfig<F, H>;
-
-    fn from_config(
-        config: RandomCoinConfig<F, H>,
+impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
+    fn new(
+        ctx: &mut Context<F>,
+        chip: &FlexGateConfig<F>,
         seed: AssignedValue<F>,
         counter: AssignedValue<F>,
     ) -> Self {
         Self {
-            config,
             seed,
             counter,
-        }
-    }
-
-    fn configure(meta: &mut ConstraintSystem<F>) -> RandomCoinConfig<F, H> {
-        RandomCoinConfig {
-            hasher_config: H::configure(meta),
             _marker: PhantomData,
         }
     }
@@ -194,9 +182,10 @@ impl<F: FieldExt, H: HasherChip> RandomCoinChip<F, H> for RandomCoin<F, H> {
     fn draw_alpha(
         &mut self,
         ctx: &mut Context<'_, F>,
+        chip: &FlexGateConfig<F>,
         commitment: AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
-        let hasher = H::from_config(self.config.hasher_config.clone());
+        let hasher = H::new(ctx, &chip);
         self.seed = hasher.hash(ctx, &[self.seed.clone(), commitment])?;
         let alpha = hasher.hash(ctx, &[self.seed.clone(), self.counter.clone()]);
         alpha
@@ -208,22 +197,19 @@ impl<F: FieldExt, H: HasherChip> RandomCoinChip<F, H> for RandomCoin<F, H> {
 
 #[allow(dead_code)]
 #[derive(Clone)]
-struct VerifierChipConfig<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> {
+struct VerifierChipConfig<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
     pub gate_config: FlexGateConfig<F>,
-    pub merkle_tree_config: MerkleTreeChipConfig<F, H>,
-    pub public_coin_config: RandomCoinConfig<F, H>,
-    pub hasher_config: H::Config,
     pub instance: Column<Instance>,
-    _marker: PhantomData<C>,
+    _marker: PhantomData<(C, H)>,
 }
 
 #[allow(dead_code)]
-struct VerifierChip<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> {
+struct VerifierChip<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
     config: VerifierChipConfig<F, H, C>,
     _marker: PhantomData<C>,
 }
 
-impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> {
+impl<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> {
     fn from_config(config: VerifierChipConfig<F, H, C>) -> Self {
         Self {
             config,
@@ -243,9 +229,6 @@ impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> 
                 1,
                 "default".to_string(),
             ),
-            merkle_tree_config: MerkleTreeChip::configure(meta),
-            public_coin_config: C::configure(meta),
-            hasher_config: H::configure(meta),
             instance,
             _marker: PhantomData,
         }
@@ -254,14 +237,24 @@ impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> 
     fn verify_proof(
         &self,
         ctx: &mut Context<'_, F>,
-        proof: &FriProof<F, H::Hasher>,
+        chip: &FlexGateConfig<F>,
+        proof: &FriProof<F>, //, Digest>,
         public_coin_seed: F,
     ) -> Result<(), Error> {
-        // TODO: Read this in from proof
-        let layer_commitments = vec![];
+        let layer_commitments = proof
+            .layer_commitments
+            .iter()
+            .map(|x| {
+                // TODO: Correctly construct field element from bytes
+                Ok(chip
+                    .assign_region(ctx, vec![Constant(F::from(0))], vec![], None)?
+                    .pop()
+                    .unwrap())
+            })
+            .collect::<Result<Vec<AssignedValue<F>>, Error>>()?;
 
         let layer_alphas =
-            self.layer_alphas(ctx, Value::known(public_coin_seed), layer_commitments)?;
+            self.layer_alphas(ctx, chip, Value::known(public_coin_seed), layer_commitments)?;
 
         // Execute FRI verification protocol for each query round
         for _ in 0..proof.queries.len() {
@@ -279,6 +272,7 @@ impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> 
     fn layer_alphas(
         &self,
         ctx: &mut Context<'_, F>,
+        chip: &FlexGateConfig<F>,
         initial_seed: Value<F>,
         commitments: Vec<AssignedValue<F>>,
     ) -> Result<Vec<AssignedValue<F>>, Error> {
@@ -292,11 +286,10 @@ impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> 
             )?;
             (cells[0].clone(), cells[1].clone())
         };
-        let mut public_coin_chip =
-            RandomCoin::from_config(self.config.public_coin_config.clone(), seed, counter);
+        let mut public_coin_chip = C::new(ctx, &self.config.gate_config, seed, counter);
         let mut alphas = vec![];
         for commitment in commitments {
-            let alpha = public_coin_chip.draw_alpha(ctx, commitment)?;
+            let alpha = public_coin_chip.draw_alpha(ctx, chip, commitment)?;
             alphas.push(alpha);
         }
         Ok(alphas)
@@ -343,16 +336,16 @@ impl<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> 
 
 const NUM_ADVICE: usize = 1;
 
-struct FriVerifierCircuit<F: FieldExt, H: HasherChip, C: RandomCoinChip<F, H>> {
-    pub proof: FriProof<F, H::Hasher>,
+struct FriVerifierCircuit<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
+    pub proof: FriProof<F>, //, Digest>,
     pub public_coin_seed: F,
-    _marker: PhantomData<C>,
+    _marker: PhantomData<(C, H)>,
 }
 
 impl<F, H, C> Default for FriVerifierCircuit<F, H, C>
 where
     F: FieldExt,
-    H: HasherChip,
+    H: HasherChip<F>,
     C: RandomCoinChip<F, H>,
 {
     fn default() -> Self {
@@ -367,7 +360,7 @@ where
 impl<F, H, C> Circuit<F> for FriVerifierCircuit<F, H, C>
 where
     F: FieldExt,
-    H: HasherChip,
+    H: HasherChip<F>,
     C: RandomCoinChip<F, H>,
 {
     type Config = VerifierChipConfig<F, H, C>;
@@ -400,7 +393,12 @@ where
                     },
                 );
 
-                verifier_chip.verify_proof(&mut ctx, &self.proof, self.public_coin_seed)?;
+                verifier_chip.verify_proof(
+                    &mut ctx,
+                    &verifier_chip.config.gate_config, //&config.gate_config,
+                    &self.proof,
+                    self.public_coin_seed,
+                )?;
 
                 Ok(())
             },

@@ -8,7 +8,6 @@ halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.gi
 halo2_gadgets = {git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_10_22" }
 halo2_base = { git = "https://github.com/axiom-crypto/halo2-base.git", branch = "poseidon" }
 halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = 'v0.2.0' }
-halo2_merkle_tree = { path = "../halo2-merkle-tree" }
 
 [dev-dependencies]
 winter-fri = "0.4.1"

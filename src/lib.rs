@@ -70,45 +70,39 @@ impl Hasher for Poseidon {
 // =========================================================================
 
 trait HasherChip: Clone {
-    type Hasher: Hasher + Clone + Default;
-    type Config: Clone;
-
-    fn from_config(config: Self::Config) -> Self;
-    fn configure<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self::Config;
+    type Digest;
+    fn new<F: FieldExt>(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> self;
     fn hash<F: FieldExt>(
         &self,
         ctx: &mut Context<'_, F>,
+        flex_gate: &FlexGateConfig<F>,
         values: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error>;
 }
 
-#[derive(Clone)]
-struct PoseidonChipConfig {
-    // TODO
-}
 
 #[derive(Clone)]
-struct PoseidonChip {
-    // TODO
+struct PoseidonChip1020x8x120 {
+    //TODO: double check T
+    inner_chip: PoseidonChip<F, FlexGateConfig, 2 , 1020>
 }
 
 #[allow(unused)]
-impl HasherChip for PoseidonChip {
-    type Hasher = Poseidon;
-    type Config = PoseidonChipConfig;
-
-    fn from_config(config: Self::Config) -> Self {
-        Self {}
-    }
-    fn configure<F: FieldExt>(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        Self::Config {}
+impl HasherChip for PoseidonChip1020x8x120 {
+    Digest=F;
+    fn new<F: FieldExt>(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> self{
+        self.inner_chip = PoseidonChip<F, FlexGateConfig, 2 , 1020>::new(ctx, flex_gate, 8, 120);
     }
     fn hash<F: FieldExt>(
         &self,
         ctx: &mut Context<'_, F>,
+        flex_gate: &FlexGateConfig<F>,
         values: &[AssignedValue<F>],
-    ) -> Result<AssignedValue<F>, Error> {
-        unimplemented!()
+    ) -> Result<AssignedValue<F>, Error>{
+        self.inner_chip.update(values);
+        let out = self.inner_chip.squeeze(ctx, flex_gate);
+        self.clear();
+        out
     }
 }
 

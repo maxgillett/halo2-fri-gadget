@@ -220,9 +220,8 @@ name = "halo2-fri-gadget"
 version = "0.1.0"
 dependencies = [
  "halo2_base",
- "halo2_gadgets 0.2.0",
- "halo2_merkle_tree",
- "halo2_proofs 0.2.0",
+ "halo2_gadgets",
+ "halo2_proofs",
  "halo2curves 0.2.0",
  "winter-crypto",
  "winter-fri",
@@ -235,28 +234,11 @@ version = "0.1.0"
 source = "git+https://github.com/axiom-crypto/halo2-base.git?branch=poseidon#e034ad74f252d600e9837165a6b63da417414e71"
 dependencies = [
  "ff",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "num-bigint",
  "num-integer",
  "num-traits",
  "poseidon",
-]
-
-[[package]]
-name = "halo2_gadgets"
-version = "0.1.0"
-source = "git+https://github.com/zcash/halo2.git?rev=a898d65ae3ad3d41987666f6a03cfc15edae01c4#a898d65ae3ad3d41987666f6a03cfc15edae01c4"
-dependencies = [
- "arrayvec",
- "bitvec",
- "ff",
- "group",
- "halo2_proofs 0.1.0",
- "lazy_static",
- "pasta_curves",
- "rand",
- "subtle",
- "uint",
 ]
 
 [[package]]
@@ -268,33 +250,12 @@ dependencies = [
  "bitvec",
  "ff",
  "group",
- "halo2_proofs 0.2.0",
+ "halo2_proofs",
  "halo2curves 0.2.1",
  "lazy_static",
  "rand",
  "subtle",
  "uint",
-]
-
-[[package]]
-name = "halo2_merkle_tree"
-version = "0.1.0"
-dependencies = [
- "halo2_gadgets 0.1.0",
- "halo2_proofs 0.1.0",
-]
-
-[[package]]
-name = "halo2_proofs"
-version = "0.1.0"
-source = "git+https://github.com/zcash/halo2.git?rev=a898d65ae3ad3d41987666f6a03cfc15edae01c4#a898d65ae3ad3d41987666f6a03cfc15edae01c4"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "pasta_curves",
- "rand_core",
- "rayon",
 ]
 
 [[package]]

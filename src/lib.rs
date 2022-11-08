@@ -7,7 +7,7 @@ use halo2_base::{
     },
     poseidon::PoseidonChip,
     AssignedValue, Context, ContextParams, QuantumCell,
-    QuantumCell::{Constant, Witness},
+    QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -18,7 +18,6 @@ use halo2_proofs::{
 // FRI PROTOCOL PARAMS
 // =========================================================================
 
-#[allow(unused)]
 #[derive(Default)]
 struct FriProof<F: FieldExt, H: HasherChip<F>> {
     pub layer_commitments: Vec<H::Digest>,
@@ -26,8 +25,7 @@ struct FriProof<F: FieldExt, H: HasherChip<F>> {
     pub options: FriOptions,
 }
 
-#[allow(unused)]
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct FriOptions {
     pub domain_size: usize,
     pub folding_factor: usize,
@@ -37,13 +35,12 @@ struct FriOptions {
 #[allow(unused)]
 struct FriQuery<F: FieldExt, H: HasherChip<F>> {
     pub evaluations: Vec<F>,
+    pub positions: Vec<F>,
     pub merkle_proof: Vec<H::Digest>,
 }
 
 // HASHER CHIP
 // =========================================================================
-
-struct Digest<F: FieldExt, const N: usize>([F; N]);
 
 trait HasherChip<F: FieldExt> {
     // TODO: Why can't a Deref trait bound be used instead of ToVec?
@@ -62,15 +59,15 @@ trait ToVec<F> {
     fn to_vec(&self) -> Vec<F>;
 }
 
+struct Digest<F: FieldExt, const N: usize>([F; N]);
+
 impl<F: FieldExt, const N: usize> ToVec<F> for Digest<F, N> {
     fn to_vec(&self) -> Vec<F> {
         self.0.to_vec()
     }
 }
 
-struct PoseidonChipBn254_8_120<F: FieldExt> {
-    inner: PoseidonChip<F, FlexGateConfig<F>, 2, 1020>,
-}
+struct PoseidonChipBn254_8_120<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 2, 1020>);
 
 // TODO: Fork halo2-base to implement Goldilocks-friendly Poseidon implementation (that can
 // return multiple values)
@@ -78,10 +75,7 @@ impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_120<F> {
     type Digest = Digest<F, 1>;
 
     fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self {
-        Self {
-            inner: PoseidonChip::<F, FlexGateConfig<F>, 2, 1020>::new(ctx, flex_gate, 8, 120)
-                .unwrap(),
-        }
+        Self(PoseidonChip::<F, FlexGateConfig<F>, 2, 1020>::new(ctx, flex_gate, 8, 120).unwrap())
     }
 
     fn hash(
@@ -90,8 +84,8 @@ impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_120<F> {
         chip: &FlexGateConfig<F>,
         values: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
-        self.inner.update(values);
-        self.inner.squeeze(ctx, chip)
+        self.0.update(values);
+        self.0.squeeze(ctx, chip)
     }
 }
 
@@ -105,7 +99,7 @@ trait RandomCoinChip<F: FieldExt, H: HasherChip<F>> {
         &mut self,
         ctx: &mut Context<'_, F>,
         chip: &FlexGateConfig<F>,
-        commitment: AssignedValue<F>,
+        commitment: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error>;
 }
 
@@ -128,10 +122,10 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
         &mut self,
         ctx: &mut Context<'_, F>,
         chip: &FlexGateConfig<F>,
-        commitment: AssignedValue<F>,
+        commitment: &AssignedValue<F>,
     ) -> Result<AssignedValue<F>, Error> {
         let mut hasher = H::new(ctx, &chip);
-        self.seed = hasher.hash(ctx, chip, &[self.seed.clone(), commitment])?;
+        self.seed = hasher.hash(ctx, chip, &[self.seed.clone(), commitment.clone()])?;
         let alpha = hasher.hash(ctx, chip, &[self.seed.clone(), self.counter.clone()]);
         alpha
     }
@@ -140,11 +134,11 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
 // MERKLE TREE CHIP
 // =========================================================================
 
-#[allow(dead_code)]
 struct MerkleTreeChip<F: FieldExt, H: HasherChip<F>> {
     _marker: PhantomData<(F, H)>,
 }
 
+#[allow(dead_code, unused)]
 impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
     fn new(ctx: &mut Context<F>, chip: &FlexGateConfig<F>) -> Self {
         Self {
@@ -153,7 +147,6 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
     }
 
     // TODO: Make root, proof, and leaf generic
-    #[allow(unused)]
     fn verify_merkle_proof(
         ctx: &mut Context<'_, F>,
         root: AssignedValue<F>,
@@ -168,51 +161,70 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
 // FRI VERIFIER CHIP
 // =========================================================================
 
-#[allow(dead_code)]
 #[derive(Clone)]
 struct VerifierChipConfig<F: FieldExt> {
-    pub gate_config: FlexGateConfig<F>,
     pub instance: Column<Instance>,
+    pub chip: FlexGateConfig<F>,
 }
 
-#[allow(dead_code)]
 struct VerifierChip<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
-    config: VerifierChipConfig<F>,
-    _marker: PhantomData<(H, C)>,
+    options: FriOptions,
+
+    positions: Vec<Vec<AssignedValue<F>>>,
+    evaluations: Vec<Vec<AssignedValue<F>>>,
+    layer_commitments: Vec<AssignedValue<F>>,
+
+    _marker: PhantomData<(C, H)>,
 }
 
 impl<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> VerifierChip<F, H, C> {
-    fn from_config(config: VerifierChipConfig<F>) -> Self {
-        Self {
-            config,
-            _marker: PhantomData,
-        }
-    }
-
-    fn configure(
-        meta: &mut ConstraintSystem<F>,
-        instance: Column<Instance>,
-    ) -> VerifierChipConfig<F> {
-        VerifierChipConfig {
-            gate_config: FlexGateConfig::configure(
-                meta,
-                GateStrategy::PlonkPlus,
-                &[NUM_ADVICE],
-                1,
-                "default".to_string(),
-            ),
-            instance,
-        }
-    }
-
-    fn verify_proof(
-        &self,
+    fn new(
         ctx: &mut Context<'_, F>,
         chip: &FlexGateConfig<F>,
         proof: &FriProof<F, H>,
-        public_coin_seed: F,
-    ) -> Result<(), Error> {
-        // Use the public coin to generate alphas from the layer commitments
+    ) -> Result<Self, Error> {
+        // TODO: Create and implement an trait on FriProof that handles assignment
+        // instead of implementing it below
+
+        // Assign positions
+        let positions = proof
+            .queries
+            .iter()
+            .map(|query| {
+                chip.assign_region_smart(
+                    ctx,
+                    query.positions[..]
+                        .iter()
+                        .map(|x| Constant(F::from(*x)))
+                        .collect::<Vec<_>>(),
+                    vec![],
+                    vec![],
+                    vec![],
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // Assign positions
+        let evaluations = proof
+            .queries
+            .iter()
+            .map(|query| {
+                chip.assign_region_smart(
+                    ctx,
+                    query.evaluations[..]
+                        .iter()
+                        .map(|x| Constant(F::from(*x)))
+                        .collect::<Vec<_>>(),
+                    vec![],
+                    vec![],
+                    vec![],
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // Assign commitments for FRI layers
         let layer_commitments = proof
             .layer_commitments
             .iter()
@@ -231,17 +243,110 @@ impl<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> VerifierChip<F, H, 
                     .unwrap())
             })
             .collect::<Result<Vec<AssignedValue<F>>, Error>>()?;
-        let alphas =
-            self.draw_alphas(ctx, chip, Value::known(public_coin_seed), layer_commitments)?;
 
-        // Execute FRI verification protocol for each query round
-        for _ in 0..proof.queries.len() {
-            let layer_values = self.layer_values(ctx, vec![])?;
-            self.evaluate_polynomials(ctx, &alphas, vec![])?;
-            self.verify_remainder(ctx, vec![], proof.options.max_remainder_degree);
+        Ok(Self {
+            options: proof.options,
+            positions,
+            evaluations,
+            layer_commitments,
+            _marker: PhantomData,
+        })
+    }
+
+    fn configure(
+        meta: &mut ConstraintSystem<F>,
+        instance: Column<Instance>,
+    ) -> VerifierChipConfig<F> {
+        VerifierChipConfig {
+            instance,
+            chip: FlexGateConfig::configure(
+                meta,
+                GateStrategy::PlonkPlus,
+                &[NUM_ADVICE],
+                1,
+                "default".to_string(),
+            ),
+        }
+    }
+
+    fn num_queries(&self) -> usize {
+        self.evaluations.len()
+    }
+
+    fn num_layers(&self) -> usize {
+        self.evaluations[0].len()
+    }
+
+    fn verify_proof(
+        &self,
+        ctx: &mut Context<'_, F>,
+        chip: &FlexGateConfig<F>,
+        public_coin_seed: F,
+    ) -> Result<(), Error> {
+        // Use the public coin to generate alphas from the layer commitments
+        let alphas = self.draw_alphas(
+            ctx,
+            chip,
+            Value::known(public_coin_seed),
+            &self.layer_commitments,
+        )?;
+
+        for n in 0..self.num_queries() {
+            let (domain_size, folding_factor) = {
+                let cells = chip.assign_region(
+                    ctx,
+                    vec![
+                        Constant(F::from(self.options.domain_size as u64)),
+                        Constant(F::from(self.options.folding_factor as u64)),
+                    ],
+                    vec![],
+                    None,
+                )?;
+                (cells[0].clone(), cells[1].clone())
+            };
+
+            // Execute FRI verification protocol for each query round
+            let query_positions = &self.positions[n];
+            let query_evaluations = &self.evaluations[n];
+            for i in 0..self.num_layers() {
+                // Fold position
+                let position = self.fold_position(
+                    ctx,
+                    chip,
+                    &query_positions[i],
+                    &domain_size,
+                    &folding_factor,
+                );
+
+                // TODO:
+                // - Convert position to a Merkle tree index i
+                // - Verify that the claimed query value (evaluations[i]) resides at position i
+                //   of the Merkle tree with the correct root (layer_commitments[i])
+            }
+
+            self.verify_remainder(ctx, vec![], self.options.max_remainder_degree);
         }
 
         Ok(())
+    }
+
+    fn fold_position(
+        &self,
+        ctx: &mut Context<'_, F>,
+        chip: &FlexGateConfig<F>,
+        position: &AssignedValue<F>,
+        domain_size: &AssignedValue<F>,
+        folding_factor: &AssignedValue<F>,
+    ) {
+        let target_domain_size =
+            chip.div_unsafe(ctx, &Existing(domain_size), &Existing(folding_factor));
+
+        // TODO
+        //chip.mod_n(
+        //    ctx,
+        //    &Existing(position),
+        //    &Existing(target_domain_size),
+        //);
     }
 
     /// Reconstruct the alphas used at each step of the FRI commit phase using the
@@ -252,10 +357,11 @@ impl<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> VerifierChip<F, H, 
         ctx: &mut Context<'_, F>,
         chip: &FlexGateConfig<F>,
         initial_seed: Value<F>,
-        commitments: Vec<AssignedValue<F>>,
+        commitments: &[AssignedValue<F>],
     ) -> Result<Vec<AssignedValue<F>>, Error> {
+        // TODO: Move seed and counter assignment to VerifierChip::new
         let (seed, counter) = {
-            let cells = self.config.gate_config.assign_region_smart(
+            let cells = chip.assign_region_smart(
                 ctx,
                 vec![Witness(initial_seed), Constant(F::from(0))],
                 vec![],
@@ -359,8 +465,6 @@ where
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let verifier_chip = VerifierChip::<F, H, C>::from_config(config);
-
         layouter.assign_region(
             || "gate",
             |region| {
@@ -371,12 +475,13 @@ where
                     },
                 );
 
-                verifier_chip.verify_proof(
+                let verifier_chip = VerifierChip::<F, H, C>::new(
                     &mut ctx,
-                    &verifier_chip.config.gate_config,
-                    &self.proof.as_ref().unwrap(),
-                    self.public_coin_seed,
+                    &config.chip,
+                    self.proof.as_ref().unwrap(),
                 )?;
+
+                verifier_chip.verify_proof(&mut ctx, &config.chip, self.public_coin_seed)?;
 
                 Ok(())
             },

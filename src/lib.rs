@@ -112,6 +112,7 @@ trait RandomCoinChip<F: FieldExt, H: HasherChip<F>> {
         &mut self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
+        hasher_chip: &mut H,
         commitment: &H::Digest,
     ) -> Result<H::Digest, Error>;
 }
@@ -135,19 +136,18 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
         &mut self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
+        hasher_chip: &mut H,
         commitment: &H::Digest,
     ) -> Result<H::Digest, Error> {
-        let mut hasher = H::new(ctx, main_chip);
-
         // Reseed
         let mut contents = self.seed.to_vec();
         contents.append(&mut commitment.to_vec());
-        self.seed = hasher.hash(ctx, main_chip, &contents)?;
+        self.seed = hasher_chip.hash(ctx, main_chip, &contents)?;
 
         // Reproduce alpha
         contents = self.seed.to_vec();
         contents.push(self.counter.clone());
-        hasher.hash(ctx, main_chip, &contents)
+        hasher_chip.hash(ctx, main_chip, &contents)
     }
 }
 
@@ -271,6 +271,7 @@ where
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
         range_chip: &RangeConfig<F>,
+        hasher_chip: &mut H,
         public_coin_seed: H::Digest,
     ) -> Result<(), Error> {
         let log_degree = self.proof.options.log_degree;
@@ -281,6 +282,7 @@ where
         let alphas = self.draw_alphas(
             ctx,
             main_chip,
+            hasher_chip,
             public_coin_seed,
             &self.proof.layer_commitments,
         )?;
@@ -382,6 +384,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
+        hasher_chip: &mut H,
         initial_seed: H::Digest,
         commitments: &[H::Digest],
     ) -> Result<Vec<H::Digest>, Error> {
@@ -396,7 +399,7 @@ where
         let mut public_coin_chip = C::new(initial_seed, counter);
         let mut alphas = vec![];
         for commitment in commitments {
-            let alpha = public_coin_chip.draw_alpha(ctx, main_chip, commitment)?;
+            let alpha = public_coin_chip.draw_alpha(ctx, main_chip, hasher_chip, commitment)?;
             alphas.push(alpha);
         }
         Ok(alphas)
@@ -515,6 +518,8 @@ where
                     },
                 );
 
+                let mut hasher_chip = H::new(&mut ctx, &config.main_chip);
+
                 let verifier_chip = VerifierChip::<F, H, C>::new(
                     &mut ctx,
                     &config.main_chip,
@@ -537,6 +542,7 @@ where
                     &mut ctx,
                     &config.main_chip,
                     &config.range_chip,
+                    &mut hasher_chip,
                     H::Digest::from_assigned(vec![public_coin_seed]),
                 )?;
 

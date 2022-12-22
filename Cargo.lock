@@ -231,7 +231,6 @@ dependencies = [
 [[package]]
 name = "halo2_base"
 version = "0.1.0"
-source = "git+https://github.com/axiom-crypto/halo2-base.git?branch=poseidon#e034ad74f252d600e9837165a6b63da417414e71"
 dependencies = [
  "ff",
  "halo2_proofs",

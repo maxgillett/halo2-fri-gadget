@@ -7,14 +7,20 @@ use halo2_base::{
         GateInstructions, RangeInstructions,
     },
     poseidon::PoseidonChip,
-    AssignedValue, Context, ContextParams, QuantumCell,
-    QuantumCell::{Constant, Existing, Witness},
+    AssignedValue, Context, ContextParams,
+    QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{Layouter, SimpleFloorPlanner, Value},
+    circuit::{Layouter, SimpleFloorPlanner},
     plonk::*,
 };
+
+fn get_root_of_unity<F: FieldExt, const TWO_ADICITY: usize>(n: usize) -> F {
+    let r = F::root_of_unity();
+    let s = 1u64 << TWO_ADICITY - n;
+    r.pow_vartime(&[s])
+}
 
 // FRI PROTOCOL PARAMS
 // =========================================================================
@@ -39,7 +45,7 @@ struct FriQueryLayer<F: FieldExt, H: HasherChip<F>> {
 struct FriOptions {
     pub folding_factor: usize,
     pub max_remainder_degree: usize,
-    pub degree_bits: usize,
+    pub log_degree: usize,
 }
 
 // HASHER CHIP
@@ -76,8 +82,7 @@ impl<F: FieldExt, const N: usize> HasherChipDigest<F> for Digest<F, N> {
 
 struct PoseidonChipBn254_8_120<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 2, 1020>);
 
-// TODO: Fork halo2-base to implement Goldilocks-friendly Poseidon implementation (that can
-// return multiple values)
+// TODO: Implement Goldilocks-friendly Poseidon implementation
 impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_120<F> {
     type Digest = Digest<F, 1>;
 
@@ -174,7 +179,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
         let mut hasher = H::new(ctx, main_chip);
 
         // Hash leaves to a single digest
-        let digest = hasher.hash(ctx, main_chip, leaves)?;
+        let mut digest = hasher.hash(ctx, main_chip, leaves)?;
         for (bit, sibling) in index_bits.iter().zip(proof) {
             // TODO: Swap digest and sibling depending on bit
             let mut values = vec![];
@@ -268,7 +273,7 @@ where
         range_chip: &RangeConfig<F>,
         public_coin_seed: H::Digest,
     ) -> Result<(), Error> {
-        let degree_bits = self.proof.options.degree_bits;
+        let log_degree = self.proof.options.log_degree;
         let folding_factor = self.proof.options.folding_factor;
         let layer_commitments = &self.proof.layer_commitments;
 
@@ -285,7 +290,7 @@ where
 
         // Determine domain bit size for each layer
         let folded_domain_bits = (0..self.num_layers())
-            .map(|x| degree_bits / folding_factor.pow(x as u32))
+            .map(|x| log_degree / folding_factor.pow(x as u32))
             .collect::<Vec<_>>();
 
         // Execute the FRI verification protocol for each query round
@@ -298,28 +303,25 @@ where
 
             // Compute the field element at the queried position
             let g = F::multiplicative_generator();
-            // TODO: We need to use a field with high 2-adicity, so we can generate the
-            // appropriately-sized subgroup. Bn254 has a 2-adicity of 1, so cannot be used.
-            // The ff crate will need to be implemented for such a field, and extended to
-            // provide the requested primitive nth root of unity.
-            let omega = F::root_of_unity(degree_bits);
-            // TODO: Implement pow_bits gate
+            let omega = get_root_of_unity::<F, 32>(log_degree);
             let omega_i =
-                main_chip.pow_bits(ctx, &Constant(omega), &position_bits.iter().map(Existing))?;
-            let x = main_chip.mul(ctx, &Constant(g), &Existing(&omega_i))?;
+                main_chip.pow_bits(ctx, omega, &position_bits.iter().map(Existing).collect())?;
+            let mut x = main_chip.mul(ctx, &Constant(g), &Existing(&omega_i))?;
 
             // Compute the folded roots of unity
             let omega_folded = (1..folding_factor)
                 .map(|i| {
-                    let new_domain_size = 2u32.pow(degree_bits as u32) / folding_factor.into() * i;
-                    omega.pow(new_domain_size)
+                    let new_domain_size = 2usize.pow(log_degree as u32) / folding_factor * i;
+                    main_chip
+                        .pow(ctx, &Existing(&omega_i), new_domain_size)
+                        .unwrap()
                 })
                 .collect::<Vec<_>>();
 
-            let previous_eval = None;
+            let mut previous_eval = None;
 
             for i in 0..self.num_layers() {
-                let evaluations = self.proof.queries[n].layers[i].evaluations;
+                let evaluations = self.proof.queries[n].layers[i].evaluations.clone();
 
                 // Fold position
                 let folded_position_bits = position_bits[folded_domain_bits[n]..].to_vec();
@@ -338,14 +340,14 @@ where
                 // Compare previous polynomial evaluation and current layer evaluation
                 if let Some(eval) = previous_eval {
                     // TODO: Use correct index for evaluations
-                    main_chip.assert_equal(ctx, &Existing(&eval), &Existing(&evaluations[0]));
+                    main_chip.assert_equal(ctx, &Existing(&eval), &Existing(&evaluations[0]))?;
                 }
 
                 // Compute the remaining x-coordinates for the given layer
                 let x_folded = (0..folding_factor)
                     .map(|i| {
                         main_chip
-                            .mul(ctx, &Existing(&x), &Constant(omega_folded[i]))
+                            .mul(ctx, &Existing(&x), &Existing(&omega_folded[i]))
                             .unwrap()
                     })
                     .collect::<Vec<_>>();
@@ -358,13 +360,12 @@ where
                     &x,
                     &x_folded,
                     &evaluations,
-                    alphas[i],
+                    &alphas[i],
                 )?);
 
                 // Update variables for the next layer
                 position_bits = folded_position_bits;
-                // TODO: Implement pow2 gate
-                x = main_chip.pow2(x, &Constant(F::from(folding_factor as u64)));
+                x = main_chip.pow(ctx, &Existing(&x), folding_factor)?;
             }
 
             // TODO
@@ -410,7 +411,7 @@ where
         x: &AssignedValue<F>,
         x_folded: &[AssignedValue<F>],
         evaluations: &[AssignedValue<F>],
-        alpha: H::Digest,
+        alpha: &H::Digest,
     ) -> Result<AssignedValue<F>, Error> {
         let alpha = alpha.to_vec();
         assert_eq!(
@@ -420,9 +421,8 @@ where
         );
         match self.proof.options.folding_factor {
             2 => {
-                // TODO: Implement invert gate
-                let x_inv = main_chip.invert(ctx, x)?;
-                let xomega = main_chip.mul(ctx, &Existing(&alpha[0]), &Witness(x_inv))?;
+                let x_inv = main_chip.invert(ctx, &Existing(x))?;
+                let xomega = main_chip.mul(ctx, &Existing(&alpha[0]), &Existing(&x_inv))?;
                 let add = main_chip.sub(ctx, &Constant(F::one()), &Existing(&xomega))?;
                 let sub = main_chip.add(ctx, &Constant(F::one()), &Existing(&xomega))?;
                 let a = main_chip.mul(ctx, &Existing(&add), &Existing(&evaluations[0]))?;
@@ -557,7 +557,7 @@ mod tests {
         let options = FriOptions {
             folding_factor: 2,
             max_remainder_degree: 256,
-            degree_bits: 1024,
+            log_degree: 21,
         };
 
         // Random coin

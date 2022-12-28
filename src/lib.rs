@@ -1,3 +1,5 @@
+#![feature(int_log)]
+
 use std::marker::PhantomData;
 
 use halo2_base::{
@@ -8,13 +10,18 @@ use halo2_base::{
     },
     poseidon::PoseidonChip,
     AssignedValue, Context, ContextParams,
-    QuantumCell::{Constant, Existing},
+    QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{Layouter, SimpleFloorPlanner},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
+
+pub mod fri;
+
+#[cfg(test)]
+mod tests;
 
 fn get_root_of_unity<F: FieldExt, const TWO_ADICITY: usize>(n: usize) -> F {
     let r = F::root_of_unity();
@@ -80,14 +87,14 @@ impl<F: FieldExt, const N: usize> HasherChipDigest<F> for Digest<F, N> {
     }
 }
 
-struct PoseidonChipBn254_8_120<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 2, 1020>);
+struct PoseidonChipBn254_8_120<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 5, 4>);
 
 // TODO: Implement Goldilocks-friendly Poseidon implementation
 impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_120<F> {
     type Digest = Digest<F, 1>;
 
     fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self {
-        Self(PoseidonChip::<F, FlexGateConfig<F>, 2, 1020>::new(ctx, flex_gate, 8, 120).unwrap())
+        Self(PoseidonChip::<F, FlexGateConfig<F>, 5, 4>::new(ctx, flex_gate, 8, 120).unwrap())
     }
 
     fn hash(
@@ -158,16 +165,8 @@ struct MerkleTreeChip<F: FieldExt, H: HasherChip<F>> {
     _marker: PhantomData<(F, H)>,
 }
 
-#[allow(dead_code, unused)]
 impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
-    fn new(ctx: &mut Context<F>, chip: &FlexGateConfig<F>) -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-
     fn verify_merkle_proof(
-        &self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
         range_chip: &RangeConfig<F>,
@@ -180,7 +179,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
 
         // Hash leaves to a single digest
         let mut digest = hasher.hash(ctx, main_chip, leaves)?;
-        for (bit, sibling) in index_bits.iter().zip(proof) {
+        for (_bit, sibling) in index_bits.iter().zip(proof) {
             // TODO: Swap digest and sibling depending on bit
             let mut values = vec![];
             values.append(&mut digest.to_vec());
@@ -189,7 +188,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
         }
 
         for (e1, e2) in root.to_vec().iter().zip(digest.to_vec().iter()) {
-            range_chip.is_equal(ctx, &Existing(e1), &Existing(e2));
+            range_chip.is_equal(ctx, &Existing(e1), &Existing(e2))?;
         }
 
         Ok(())
@@ -201,6 +200,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
 
 #[derive(Clone)]
 struct VerifierChipConfig<F: FieldExt> {
+    #[allow(dead_code)]
     pub instance: Column<Instance>,
     pub main_chip: FlexGateConfig<F>,
     pub range_chip: RangeConfig<F>,
@@ -217,18 +217,9 @@ where
     H: HasherChip<F>,
     C: RandomCoinChip<F, H>,
 {
-    fn new(
-        ctx: &mut Context<'_, F>,
-        chip: &FlexGateConfig<F>,
-        options: FriOptions,
-    ) -> Result<Self, Error> {
+    fn new(proof: FriProof<F, H>) -> Result<Self, Error> {
         Ok(Self {
-            // TODO: Create FriProof from params
-            proof: FriProof {
-                layer_commitments: vec![],
-                queries: vec![],
-                options,
-            },
+            proof,
             _marker: PhantomData,
         })
     }
@@ -287,9 +278,6 @@ where
             &self.proof.layer_commitments,
         )?;
 
-        // Initialize the Merkle tree chip
-        let mut merkle_chip = MerkleTreeChip::<F, H>::new(ctx, main_chip);
-
         // Determine domain bit size for each layer
         let folded_domain_bits = (0..self.num_layers())
             .map(|x| log_degree / folding_factor.pow(x as u32))
@@ -300,12 +288,12 @@ where
             let mut position_bits = range_chip.num_to_bits(
                 ctx,
                 &self.proof.queries[n].position,
-                F::NUM_BITS as usize,
+                28, //F::NUM_BITS as usize,
             )?;
 
             // Compute the field element at the queried position
             let g = F::multiplicative_generator();
-            let omega = get_root_of_unity::<F, 32>(log_degree);
+            let omega = get_root_of_unity::<F, 28>(log_degree);
             let omega_i =
                 main_chip.pow_bits(ctx, omega, &position_bits.iter().map(Existing).collect())?;
             let mut x = main_chip.mul(ctx, &Constant(g), &Existing(&omega_i))?;
@@ -329,7 +317,7 @@ where
                 let folded_position_bits = position_bits[folded_domain_bits[n]..].to_vec();
 
                 // Verify that evaluations reside at the folded position in the Merkle tree
-                merkle_chip.verify_merkle_proof(
+                MerkleTreeChip::<F, H>::verify_merkle_proof(
                     ctx,
                     main_chip,
                     range_chip,
@@ -346,7 +334,7 @@ where
                 }
 
                 // Compute the remaining x-coordinates for the given layer
-                let x_folded = (0..folding_factor)
+                let x_folded = (0..folding_factor - 1)
                     .map(|i| {
                         main_chip
                             .mul(ctx, &Existing(&x), &Existing(&omega_folded[i]))
@@ -412,7 +400,7 @@ where
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
         x: &AssignedValue<F>,
-        x_folded: &[AssignedValue<F>],
+        _x_folded: &[AssignedValue<F>],
         evaluations: &[AssignedValue<F>],
         alpha: &H::Digest,
     ) -> Result<AssignedValue<F>, Error> {
@@ -461,9 +449,12 @@ where
 // CIRCUIT
 // =========================================================================
 
-const NUM_ADVICE: usize = 1;
+const NUM_ADVICE: usize = 3;
 
 struct FriVerifierCircuit<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
+    pub layer_commitments: Vec<[u8; 32]>,
+    pub queries: Vec<fri::QueryWitness<F>>,
+    pub remainder: Vec<F>,
     pub options: FriOptions,
     pub public_coin_seed: F,
     _marker: PhantomData<(C, H)>,
@@ -477,6 +468,9 @@ where
 {
     fn default() -> Self {
         Self {
+            layer_commitments: vec![],
+            queries: vec![],
+            remainder: vec![],
             options: FriOptions::default(),
             public_coin_seed: F::default(),
             _marker: PhantomData,
@@ -487,7 +481,7 @@ where
 impl<F, H, C> Circuit<F> for FriVerifierCircuit<F, H, C>
 where
     F: FieldExt,
-    H: HasherChip<F>,
+    H: HasherChip<F, Digest = Digest<F, 1>>,
     C: RandomCoinChip<F, H>,
 {
     type Config = VerifierChipConfig<F>;
@@ -518,25 +512,62 @@ where
                     },
                 );
 
-                let mut hasher_chip = H::new(&mut ctx, &config.main_chip);
-
-                let verifier_chip = VerifierChip::<F, H, C>::new(
+                // Assign witness cells
+                // TODO: Refactor:
+                // - Use a single assign call, and split returned cells?
+                // - Create helper functions to minimize boilerplate
+                let layer_commitments =
+                    assign_digests::<F, H>(&mut ctx, &config.main_chip, &self.layer_commitments)?;
+                let positions = config.main_chip.assign_region(
                     &mut ctx,
-                    &config.main_chip,
-                    self.options,
-                    // TODO: Pass in FRI proof values
+                    self.queries
+                        .iter()
+                        .map(|q| Witness(Value::known(F::from(q.position as u64))))
+                        .collect::<Vec<_>>(),
+                    vec![],
+                    None,
                 )?;
-
-                let public_coin_seed = config
-                    .main_chip
-                    .assign_region(
-                        &mut ctx,
-                        vec![Constant(self.public_coin_seed)],
-                        vec![],
-                        None,
-                    )
-                    .unwrap()[0]
+                let mut queries = vec![];
+                for (n, query) in self.queries.iter().enumerate() {
+                    let mut layers = vec![];
+                    for layer in query.layers.iter() {
+                        let evaluations = config.main_chip.assign_region(
+                            &mut ctx,
+                            layer
+                                .evaluations
+                                .iter()
+                                .map(|x| Witness(Value::known(*x)))
+                                .collect(),
+                            vec![],
+                            None,
+                        )?;
+                        let merkle_proof =
+                            assign_digests::<F, H>(&mut ctx, &config.main_chip, &vec![])?;
+                        layers.push(FriQueryLayer {
+                            evaluations,
+                            merkle_proof,
+                        });
+                    }
+                    queries.push(FriQuery {
+                        position: positions[n].clone(),
+                        layers,
+                    });
+                }
+                let public_coin_seed = config.main_chip.assign_region(
+                    &mut ctx,
+                    vec![Constant(self.public_coin_seed)],
+                    vec![],
+                    None,
+                )?[0]
                     .clone();
+
+                // Initialize chips
+                let mut hasher_chip = H::new(&mut ctx, &config.main_chip);
+                let verifier_chip = VerifierChip::<F, H, C>::new(FriProof {
+                    layer_commitments,
+                    queries,
+                    options: self.options,
+                })?;
 
                 verifier_chip.verify_proof(
                     &mut ctx,
@@ -554,33 +585,23 @@ where
     }
 }
 
-mod tests {
-    use super::*;
-    use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
-
-    #[test]
-    fn test() {
-        let options = FriOptions {
-            folding_factor: 2,
-            max_remainder_degree: 256,
-            log_degree: 21,
-        };
-
-        // Random coin
-        let public_coin_seed = Fr::from(1);
-
-        let circuit = FriVerifierCircuit::<
-            Fr,
-            PoseidonChipBn254_8_120<Fr>,
-            RandomCoin<Fr, PoseidonChipBn254_8_120<Fr>>,
-        > {
-            options,
-            public_coin_seed,
-            _marker: PhantomData,
-        };
-
-        //let public_input = vec![];
-        let prover = MockProver::run(10, &circuit, vec![]).unwrap();
-        prover.assert_satisfied();
-    }
+// TODO: Correctly convert [u8; 32] values to field elements
+fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
+    ctx: &mut Context<'_, F>,
+    main_chip: &FlexGateConfig<F>,
+    values: &[[u8; 32]],
+) -> Result<Vec<H::Digest>, Error> {
+    Ok(main_chip
+        .assign_region(
+            ctx,
+            values
+                .iter()
+                .map(|_x| Witness(Value::known(F::from(1)))) // TODO
+                .collect::<Vec<_>>(),
+            vec![],
+            None,
+        )?
+        .into_iter()
+        .map(|x| Digest::from_assigned(vec![x]))
+        .collect::<Vec<_>>())
 }

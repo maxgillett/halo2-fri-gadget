@@ -219,6 +219,7 @@ dependencies = [
 name = "halo2-fri-gadget"
 version = "0.1.0"
 dependencies = [
+ "ff",
  "halo2_base",
  "halo2_gadgets",
  "halo2_proofs",
@@ -226,6 +227,7 @@ dependencies = [
  "winter-crypto",
  "winter-fri",
  "winter-math",
+ "winter-utils",
 ]
 
 [[package]]
@@ -624,9 +626,8 @@ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
 name = "winter-crypto"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3b7fa27a9a8af69cef677c1e1e862f9407d38653147a7fc33598e97eae952ad"
+version = "0.4.2"
+source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
 dependencies = [
  "blake3",
  "sha3",
@@ -636,9 +637,8 @@ dependencies = [
 
 [[package]]
 name = "winter-fri"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd4eeef44f2b9d87d63c103fdb4ae153e95ce19a95cd21eac41e2f6ac6208fd0"
+version = "0.4.2"
+source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
 dependencies = [
  "winter-crypto",
  "winter-math",
@@ -647,18 +647,16 @@ dependencies = [
 
 [[package]]
 name = "winter-math"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "832e65d38b360197308d8e76c7079872240ddd0ddcbd2f84230f4daa871b9bb9"
+version = "0.4.2"
+source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
 dependencies = [
  "winter-utils",
 ]
 
 [[package]]
 name = "winter-utils"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "374ba32c037848e35b690e03ae6a9a898b2e7f8bdb4ab3a868e2657c8af26ea9"
+version = "0.4.2"
+source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
 
 [[package]]
 name = "wyz"

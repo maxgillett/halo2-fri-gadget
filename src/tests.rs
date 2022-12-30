@@ -3,15 +3,15 @@ use core::mem;
 use ff::PrimeField;
 use halo2_proofs::dev::MockProver;
 
-use winter_crypto::{hashers::Blake3_256, BatchMerkleProof, Digest, ElementHasher};
+use winter_crypto::{BatchMerkleProof, Digest, ElementHasher};
 use winter_fri::{DefaultProverChannel, FriOptions as WinterFriOptions, FriProof, FriProver};
 use winter_math::{fft, FieldElement, StarkField};
 use winter_utils::AsBytes;
 
-// Bn254
 mod winter;
 use halo2_proofs::halo2curves::bn256::Fr;
 use winter::field::bn254::BaseElement;
+use winter::hash::poseidon::Poseidon;
 
 // TODO: Make field generic below, and test with Goldilocks
 //use halo2_arithmetic::goldilocks;
@@ -32,7 +32,7 @@ fn test() {
     let folding_factor = 2;
     let num_queries = 56;
     let max_remainder_degree = 8;
-    type HashFn = Blake3_256<BaseElement>;
+    type HashFn = Poseidon<BaseElement>;
 
     // Evaluate a random polynomial over the domain
     let evaluations = eval_rand_polynomial(trace_length, domain_size);

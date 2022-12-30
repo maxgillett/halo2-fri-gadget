@@ -1,13 +1,21 @@
 use super::*;
 use core::mem;
 use ff::PrimeField;
-use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
+use halo2_proofs::dev::MockProver;
 
-// TODO: Implement Bn254 field in Winterfell
 use winter_crypto::{hashers::Blake3_256, BatchMerkleProof, Digest, ElementHasher};
 use winter_fri::{DefaultProverChannel, FriOptions as WinterFriOptions, FriProof, FriProver};
-use winter_math::{fft, fields::f64::BaseElement, FieldElement, StarkField};
+use winter_math::{fft, FieldElement, StarkField};
 use winter_utils::AsBytes;
+
+// Bn254
+mod winter;
+use halo2_proofs::halo2curves::bn256::Fr;
+use winter::field::bn254::BaseElement;
+
+// TODO: Make field generic below, and test with Goldilocks
+//use halo2_arithmetic::goldilocks;
+//use winter_math::fields::f64::BaseElement;
 
 type LayerCommitments = Vec<[u8; 32]>;
 type Query = fri::QueryWitness<Fr>;
@@ -209,6 +217,5 @@ pub fn group_vector_elements<T, const N: usize>(source: Vec<T>) -> Vec<[T; N]> {
 
 // TODO: Correctly convert [u8; 32] to field element Fr
 fn base_element_to_fr(y: BaseElement) -> Fr {
-    //Fr::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
-    Fr::from_repr([0u8; 32]).unwrap()
+    Fr::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
 }

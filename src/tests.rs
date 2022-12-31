@@ -5,9 +5,9 @@ use halo2_proofs::halo2curves::bn256::Fr;
 use winter_fri::{DefaultProverChannel, FriOptions as WinterFriOptions};
 
 mod winter;
+use winter::eval_rand_polynomial;
 use winter::field::bn254::BaseElement;
 use winter::hash::poseidon::Poseidon;
-use winter::{build_winter_fri_proof, eval_rand_polynomial, extract_witness};
 
 // TODO: Make field generic below, and test with Goldilocks
 //use halo2_arithmetic::goldilocks;
@@ -18,7 +18,7 @@ type Query = fri::QueryWitness<Fr>;
 type Remainder = Vec<Fr>;
 
 #[test]
-fn test_winter_fri() {
+fn test_verify_winter() {
     // Polynomial parameters
     let trace_length = 1024;
     let blowup_factor = 2;
@@ -36,7 +36,7 @@ fn test_winter_fri() {
     // Build a FRI proof
     let mut channel =
         DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(domain_size, num_queries);
-    let (proof, positions) = build_winter_fri_proof(
+    let (proof, positions) = winter::build_fri_proof(
         evaluations,
         &mut channel,
         WinterFriOptions::new(blowup_factor, folding_factor, max_remainder_degree),
@@ -44,8 +44,7 @@ fn test_winter_fri() {
 
     // Extract witness data from proof
     let (layer_commitments, queries, remainder) = match folding_factor {
-        2 => extract_witness::<2, HashFn>(proof, channel, positions, domain_size),
-        4 => extract_witness::<4, HashFn>(proof, channel, positions, domain_size),
+        2 => winter::extract_witness::<2, HashFn>(proof, channel, positions, domain_size),
         _ => panic!("unsupported folding factor"),
     };
 

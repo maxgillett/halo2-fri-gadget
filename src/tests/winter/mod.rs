@@ -25,7 +25,7 @@ pub fn eval_rand_polynomial(trace_length: usize, domain_size: usize) -> Vec<Base
 }
 
 /// Build a FRI proof using the Winterfell package
-pub fn build_winter_fri_proof<
+pub fn build_fri_proof<
     B: StarkField,
     E: FieldElement<BaseField = B>,
     H: ElementHasher<BaseField = B>,

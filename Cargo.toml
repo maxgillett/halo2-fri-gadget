@@ -3,11 +3,17 @@ name = "halo2-fri-gadget"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
 [dependencies]
 goldilocks = { path = "../halo2-ce/arithmetic/goldilocks" }
 halo2_proofs = { path = "../halo2-ce/halo2_proofs" }
 halo2_base = { path = "../halo2-base" }
 ff = "0.12.0"
+num-bigint = "0.4.3"
+log = "0.4.17"
 
 [dev-dependencies]
 winter-fri = { git = "https://github.com/facebook/winterfell.git" }
@@ -16,3 +22,6 @@ winter-crypto = { git = "https://github.com/facebook/winterfell.git" }
 winter-utils = { git = "https://github.com/facebook/winterfell.git" }
 uint = "0.9.3"
 serde = { version = "1.0", default-features = false }
+itertools = "0.10.5"
+hex = "0.4.3"
+env_logger = "0.10.0"

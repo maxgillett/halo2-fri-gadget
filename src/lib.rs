@@ -17,6 +17,9 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
+use num_bigint::BigUint;
+
+use log::debug;
 
 pub mod fri;
 
@@ -87,14 +90,14 @@ impl<F: FieldExt, const N: usize> HasherChipDigest<F> for Digest<F, N> {
     }
 }
 
-struct PoseidonChipBn254_8_120<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 5, 4>);
+struct PoseidonChipBn254_8_58<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 4, 3>);
 
 // TODO: Implement Goldilocks-friendly Poseidon implementation
-impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_120<F> {
+impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_58<F> {
     type Digest = Digest<F, 1>;
 
     fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self {
-        Self(PoseidonChip::<F, FlexGateConfig<F>, 5, 4>::new(ctx, flex_gate, 8, 120).unwrap())
+        Self(PoseidonChip::<F, FlexGateConfig<F>, 4, 3>::new(ctx, flex_gate, 8, 58).unwrap())
     }
 
     fn hash(
@@ -153,6 +156,7 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
 
         // Reproduce alpha
         contents = self.seed.to_vec();
+        self.counter = main_chip.add(ctx, &Constant(F::one()), &Existing(&self.counter))?;
         contents.push(self.counter.clone());
         hasher_chip.hash(ctx, main_chip, &contents)
     }
@@ -179,11 +183,24 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
 
         // Hash leaves to a single digest
         let mut digest = hasher.hash(ctx, main_chip, leaves)?;
-        for (_bit, sibling) in index_bits.iter().zip(proof) {
-            // TODO: Swap digest and sibling depending on bit
+        for (bit, sibling) in index_bits.iter().zip(proof) {
+            // TODO: Swap digest and sibling depending on bit, including when
+            // H::Digest is composed of more than one value (e.g. 4 u64 values)
             let mut values = vec![];
-            values.append(&mut digest.to_vec());
-            values.append(&mut sibling.to_vec());
+            let a = main_chip.select(
+                ctx,
+                &Existing(&digest.to_vec()[0]),
+                &Existing(&sibling.to_vec()[0]),
+                &Existing(&bit),
+            )?;
+            let b = main_chip.select(
+                ctx,
+                &Existing(&sibling.to_vec()[0]),
+                &Existing(&digest.to_vec()[0]),
+                &Existing(&bit),
+            )?;
+            values.push(a);
+            values.push(b);
             digest = hasher.hash(ctx, main_chip, &values)?;
         }
 
@@ -277,19 +294,19 @@ where
             public_coin_seed,
             &self.proof.layer_commitments,
         )?;
+        for alpha in alphas.iter() {
+            debug!("alpha {:?}", alpha.to_vec()[0].value());
+        }
 
         // Determine domain bit size for each layer
         let folded_domain_bits = (0..self.num_layers())
-            .map(|x| log_degree / folding_factor.pow(x as u32))
+            .map(|_| folding_factor.ilog2() as usize)
             .collect::<Vec<_>>();
 
         // Execute the FRI verification protocol for each query round
         for n in 0..self.num_queries() {
-            let mut position_bits = range_chip.num_to_bits(
-                ctx,
-                &self.proof.queries[n].position,
-                28, //F::NUM_BITS as usize,
-            )?;
+            let mut position_bits =
+                range_chip.num_to_bits(ctx, &self.proof.queries[n].position, 28)?;
 
             // Compute the field element at the queried position
             let g = F::multiplicative_generator();
@@ -310,11 +327,11 @@ where
 
             let mut previous_eval = None;
 
-            for i in 0..self.num_layers() {
+            for i in 0..self.num_layers() - 1 {
                 let evaluations = self.proof.queries[n].layers[i].evaluations.clone();
 
                 // Fold position
-                let folded_position_bits = position_bits[folded_domain_bits[n]..].to_vec();
+                let folded_position_bits = position_bits[folded_domain_bits[i]..].to_vec();
 
                 // Verify that evaluations reside at the folded position in the Merkle tree
                 MerkleTreeChip::<F, H>::verify_merkle_proof(
@@ -329,7 +346,7 @@ where
 
                 // Compare previous polynomial evaluation and current layer evaluation
                 if let Some(eval) = previous_eval {
-                    // TODO: Use correct index for evaluations
+                    // FIXME: Use correct index for evaluations
                     main_chip.assert_equal(ctx, &Existing(&eval), &Existing(&evaluations[0]))?;
                 }
 
@@ -449,7 +466,7 @@ where
 // CIRCUIT
 // =========================================================================
 
-const NUM_ADVICE: usize = 3;
+const NUM_ADVICE: usize = 6;
 
 struct FriVerifierCircuit<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
     pub layer_commitments: Vec<[u8; 32]>,
@@ -541,8 +558,11 @@ where
                             vec![],
                             None,
                         )?;
-                        let merkle_proof =
-                            assign_digests::<F, H>(&mut ctx, &config.main_chip, &vec![])?;
+                        let merkle_proof = assign_digests::<F, H>(
+                            &mut ctx,
+                            &config.main_chip,
+                            &layer.merkle_proof,
+                        )?;
                         layers.push(FriQueryLayer {
                             evaluations,
                             merkle_proof,
@@ -585,7 +605,6 @@ where
     }
 }
 
-// TODO: Correctly convert [u8; 32] values to field elements
 fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
     ctx: &mut Context<'_, F>,
     main_chip: &FlexGateConfig<F>,
@@ -596,7 +615,12 @@ fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
             ctx,
             values
                 .iter()
-                .map(|_x| Witness(Value::known(F::from(1)))) // TODO
+                .map(|x| {
+                    // TODO: Use F::from_repr instead
+                    let a = BigUint::from_bytes_be(&x[..]).to_string();
+                    let b = F::from_str_vartime(a.as_str()).unwrap();
+                    Witness(Value::known(b))
+                })
                 .collect::<Vec<_>>(),
             vec![],
             None,

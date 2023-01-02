@@ -1,13 +1,18 @@
 use super::*;
 use core::mem;
+use itertools::Itertools;
+use std::collections::HashMap;
 
 use field::bn254::BaseElement;
 use halo2_proofs::halo2curves::bn256::Fr;
 
-use winter_crypto::{BatchMerkleProof, Digest, ElementHasher};
-use winter_fri::{DefaultProverChannel, FriOptions as WinterFriOptions, FriProof, FriProver};
+use winter_crypto::{Digest, ElementHasher};
+use winter_fri::{FriOptions as WinterFriOptions, FriProof, FriProver};
 use winter_math::{fft, FieldElement, StarkField};
 use winter_utils::AsBytes;
+
+pub mod channel;
+pub use channel::DefaultProverChannel;
 
 pub mod field;
 pub mod hash;
@@ -63,54 +68,68 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
         .map(|x| base_element_to_fr(*x))
         .collect::<Vec<_>>();
 
-    // Parse layer queries
-    let (layer_queries, layer_merkle_proofs) = proof.parse_layers(domain_size, N).unwrap();
-    let layer_queries = layer_queries
-        .into_iter()
-        .map(|query| {
-            group_vector_elements::<BaseElement, N>(query)
-                .iter()
-                .map(|x| x.iter().map(|y| base_element_to_fr(*y)).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<Vec<_>>>();
+    // Parse layer queries and Merkle proofs
+    let (layer_queries, layer_merkle_proofs) = proof
+        .parse_layers::<H, BaseElement>(domain_size, N)
+        .unwrap();
 
-    // Unbatch layer proofs, indexed first by layer, and then by query
-    // position index
+    // Unbatch and reinsert queries/proofs
     let mut indices = positions.clone();
     let mut source_domain_size = domain_size;
-    let layer_proofs = layer_merkle_proofs
-        .into_iter()
-        .map(|layer_proof: BatchMerkleProof<H>| {
+    let (layer_queries, layer_merkle_proofs) = {
+        let mut layer_queries_ = vec![];
+        let mut layer_merkle_proofs_ = vec![];
+        for (queries, batch_merkle_proof) in layer_queries.into_iter().zip(layer_merkle_proofs) {
             indices = fold_positions(&indices, source_domain_size, N);
             source_domain_size /= N;
-            layer_proof
-                .into_paths(&indices)
-                .unwrap()
-                .iter()
-                .map(|paths| {
-                    paths
+            let indices_deduped = indices.iter().cloned().unique().collect::<Vec<_>>();
+            let mut query_map = HashMap::new();
+            let mut proof_map = HashMap::new();
+            for (index, values, proofs) in itertools::izip!(
+                &indices_deduped,
+                group_vector_elements::<BaseElement, N>(queries),
+                batch_merkle_proof.into_paths(&indices_deduped[..]).unwrap()
+            ) {
+                query_map.insert(
+                    index,
+                    values
+                        .iter()
+                        .map(|x| base_element_to_fr(*x))
+                        .collect::<Vec<_>>(),
+                );
+                proof_map.insert(
+                    index,
+                    proofs
                         .into_iter()
-                        .map(|x| <[u8; 32]>::try_from(x.as_bytes()).unwrap())
-                        .collect::<Vec<_>>()
+                        .map(|x: H::Digest| <[u8; 32]>::try_from(x.as_bytes()).unwrap())
+                        .collect::<Vec<_>>(),
+                );
+            }
+            let (q, p): (Vec<_>, Vec<_>) = indices
+                .iter()
+                .map(|i| {
+                    (
+                        query_map.get(i).unwrap().clone(),
+                        proof_map.get(i).unwrap().clone(),
+                    )
                 })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
+                .into_iter()
+                .unzip();
+            layer_queries_.push(q);
+            layer_merkle_proofs_.push(p);
+        }
+        (layer_queries_, layer_merkle_proofs_)
+    };
 
     // Build queries
     let queries = positions
         .into_iter()
         .enumerate()
-        .map(|(_i, position)| {
-            let layers = layer_proofs
-                .iter()
-                .enumerate()
-                .map(|(_n, _proof)| fri::QueryLayerWitness {
-                    // TODO: Lookup evaluations and merkle proofs from layer_queries
-                    // and layer_proofs respectively, at the position indices
-                    evaluations: vec![Fr::from(1); 56], // TODO
-                    merkle_proof: vec![],               // TODO
+        .map(|(i, position)| {
+            let layers = (0..layer_queries.len())
+                .map(|j| fri::QueryLayerWitness {
+                    evaluations: layer_queries[j][i].clone(),
+                    merkle_proof: layer_merkle_proofs[j][i].clone(),
                 })
                 .collect();
             fri::QueryWitness { position, layers }
@@ -129,10 +148,7 @@ pub fn fold_positions(
     let mut result = Vec::new();
     for position in positions {
         let position = position % target_domain_size;
-        // make sure we don't record duplicated values
-        if !result.contains(&position) {
-            result.push(position);
-        }
+        result.push(position);
     }
     result
 }
@@ -152,7 +168,6 @@ pub fn group_vector_elements<T, const N: usize>(source: Vec<T>) -> Vec<[T; N]> {
     unsafe { Vec::from_raw_parts(p as *mut [T; N], len, cap) }
 }
 
-// TODO: Correctly convert [u8; 32] to field element Fr
 fn base_element_to_fr(y: BaseElement) -> Fr {
     Fr::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
 }

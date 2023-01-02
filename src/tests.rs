@@ -2,7 +2,8 @@ use super::*;
 use ff::PrimeField;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::halo2curves::bn256::Fr;
-use winter_fri::{DefaultProverChannel, FriOptions as WinterFriOptions};
+use winter_crypto::{Digest, ElementHasher, Hasher};
+use winter_fri::FriOptions as WinterFriOptions;
 
 mod winter;
 use winter::eval_rand_polynomial;
@@ -19,6 +20,8 @@ type Remainder = Vec<Fr>;
 
 #[test]
 fn test_verify_winter() {
+    env_logger::init();
+
     // Polynomial parameters
     let trace_length = 1024;
     let blowup_factor = 2;
@@ -26,16 +29,18 @@ fn test_verify_winter() {
 
     // Fri parameters
     let folding_factor = 2;
-    let num_queries = 56;
-    let max_remainder_degree = 8;
+    let num_queries = 28;
+    let max_remainder_degree = 16;
     type HashFn = Poseidon<BaseElement>;
 
     // Evaluate a random polynomial over the domain
     let evaluations = eval_rand_polynomial(trace_length, domain_size);
 
     // Build a FRI proof
-    let mut channel =
-        DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(domain_size, num_queries);
+    let mut channel = winter::DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(
+        domain_size,
+        num_queries,
+    );
     let (proof, positions) = winter::build_fri_proof(
         evaluations,
         &mut channel,
@@ -48,10 +53,14 @@ fn test_verify_winter() {
         _ => panic!("unsupported folding factor"),
     };
 
+    let seed = Poseidon::<BaseElement>::hash(&[]);
+    let public_coin_seed =
+        Fr::from_repr(<[u8; 32]>::try_from(&seed.as_bytes()[..]).unwrap()).unwrap();
+
     let circuit = FriVerifierCircuit::<
         Fr,
-        PoseidonChipBn254_8_120<Fr>,
-        RandomCoin<Fr, PoseidonChipBn254_8_120<Fr>>,
+        PoseidonChipBn254_8_58<Fr>,
+        RandomCoin<Fr, PoseidonChipBn254_8_58<Fr>>,
     > {
         layer_commitments,
         queries,
@@ -61,11 +70,11 @@ fn test_verify_winter() {
             max_remainder_degree,
             log_degree: (domain_size as usize).ilog2() as usize,
         },
-        public_coin_seed: Fr::from(1),
+        public_coin_seed,
         _marker: PhantomData,
     };
 
     let public_input = vec![Fr::from(1)];
-    let prover = MockProver::run(16, &circuit, vec![public_input]).unwrap();
+    let prover = MockProver::run(18, &circuit, vec![public_input]).unwrap();
     prover.assert_satisfied();
 }

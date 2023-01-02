@@ -7,5 +7,5 @@ pub struct QueryWitness<F: FieldExt> {
 
 pub struct QueryLayerWitness<F: FieldExt> {
     pub evaluations: Vec<F>,
-    pub merkle_proof: Vec<Vec<[u8; 32]>>,
+    pub merkle_proof: Vec<[u8; 32]>,
 }

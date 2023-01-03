@@ -291,7 +291,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
- "poseidon 0.2.0",
+ "poseidon",
  "serde",
  "uint",
  "winter-crypto",
@@ -310,7 +310,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "poseidon 0.2.0 (git+https://github.com/maxgillett/poseidon?branch=halo2_fri)",
+ "poseidon",
 ]
 
 [[package]]
@@ -514,15 +514,6 @@ name = "pin-project-lite"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
-
-[[package]]
-name = "poseidon"
-version = "0.2.0"
-dependencies = [
- "group",
- "halo2curves",
- "subtle",
-]
 
 [[package]]
 name = "poseidon"

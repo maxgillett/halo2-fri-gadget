@@ -20,7 +20,7 @@ winter-fri = { git = "https://github.com/facebook/winterfell.git" }
 winter-math = { git = "https://github.com/facebook/winterfell.git" }
 winter-crypto = { git = "https://github.com/facebook/winterfell.git" }
 winter-utils = { git = "https://github.com/facebook/winterfell.git" }
-poseidon = { path = "../poseidon" }
+poseidon = { git = "https://github.com/maxgillett/poseidon", branch = "halo2_fri" }
 uint = "0.9.3"
 serde = { version = "1.0", default-features = false }
 itertools = "0.10.5"

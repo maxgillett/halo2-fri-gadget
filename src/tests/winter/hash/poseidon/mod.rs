@@ -1,19 +1,39 @@
-mod param;
 use core::marker::PhantomData;
 use core::{fmt::Debug, slice};
-
-// Optimized version of poseidon with same output as the basic permutation
-mod poseidon;
+use std::sync::Mutex;
 
 use winter_crypto::{Digest, ElementHasher, Hasher};
 use winter_math::{FieldElement, StarkField};
 use winter_utils::{ByteReader, Deserializable, DeserializationError, Serializable};
 
+use ff::PrimeField;
+use halo2_proofs::halo2curves::bn256::Fr;
+use poseidon::Poseidon as PoseidonHasher;
+
+// POSEIDON HASHER SINGLETON
+// ===============================================================================================
+
+type PoseidonBn254_4_3 = PoseidonHasher<Fr, 4, 3>;
+
+lazy_static! {
+    static ref HASHER: Mutex<PoseidonBn254_4_3> = Mutex::new(PoseidonBn254_4_3::new(8, 58));
+}
+
+fn poseidon_hash(data: &[[u8; 32]]) -> ByteDigest<32> {
+    let mut hasher = HASHER.lock().unwrap();
+    hasher.update(
+        &data
+            .into_iter()
+            .map(|x| Fr::from_repr(*x).unwrap())
+            .collect::<Vec<_>>()[..],
+    );
+    let a = hasher.squeeze();
+    hasher.clear();
+    ByteDigest::new(<[u8; 32]>::try_from(&a.to_repr()[..]).unwrap())
+}
+
 // POSEIDON WITH 256-BIT OUTPUT
 // ===============================================================================================
-/// (Taken from https://github.com/VictorColomb/stark-snark-recursive-proofs)
-/// Implementation of the [Hasher](super::Hasher) trait for POSEIDON hash function with 256-bit
-/// output.
 
 pub struct Poseidon<B: StarkField>(PhantomData<B>);
 
@@ -23,22 +43,22 @@ impl<B: StarkField> Hasher for Poseidon<B> {
     const COLLISION_RESISTANCE: u32 = 128;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
-        // return the first [RATE] elements of the state as hash result
-        poseidon::digest(bytes)
+        let data = bytes.array_chunks::<32>().cloned().collect::<Vec<_>>();
+        poseidon_hash(&data)
     }
 
     fn merge(values: &[Self::Digest; 2]) -> Self::Digest {
-        let mut data = [0; 64];
-        data[..32].copy_from_slice(values[0].0.as_slice());
-        data[32..].copy_from_slice(values[1].0.as_slice());
-        poseidon::digest(&data)
+        let mut data = [[0; 32]; 2];
+        data[0].copy_from_slice(values[0].0.as_slice());
+        data[1].copy_from_slice(values[1].0.as_slice());
+        poseidon_hash(&data)
     }
 
     fn merge_with_int(seed: Self::Digest, value: u64) -> Self::Digest {
-        let mut data = [0; 40];
-        data[..32].copy_from_slice(&seed.0);
-        data[32..].copy_from_slice(&value.to_le_bytes());
-        poseidon::digest(&data)
+        let mut data = [[0; 32]; 2];
+        data[0].copy_from_slice(&seed.0);
+        data[1][..8].copy_from_slice(&value.to_le_bytes());
+        poseidon_hash(&data)
     }
 }
 
@@ -48,8 +68,11 @@ impl<B: StarkField> ElementHasher for Poseidon<B> {
     fn hash_elements<E: FieldElement<BaseField = Self::BaseField>>(elements: &[E]) -> Self::Digest {
         assert!(B::IS_CANONICAL);
 
-        let bytes = E::elements_as_bytes(elements);
-        poseidon::digest(bytes)
+        let data = elements
+            .iter()
+            .map(|x| <[u8; 32]>::try_from(x.as_bytes()).unwrap())
+            .collect::<Vec<_>>();
+        poseidon_hash(&data)
     }
 }
 

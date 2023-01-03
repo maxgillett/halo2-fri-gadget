@@ -2,7 +2,7 @@ use super::*;
 use ff::PrimeField;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::halo2curves::bn256::Fr;
-use winter_crypto::{Digest, ElementHasher, Hasher};
+use winter_crypto::{Digest, Hasher};
 use winter_fri::FriOptions as WinterFriOptions;
 
 mod winter;
@@ -18,9 +18,13 @@ type LayerCommitments = Vec<[u8; 32]>;
 type Query = fri::QueryWitness<Fr>;
 type Remainder = Vec<Fr>;
 
+fn init() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 #[test]
 fn test_verify_winter() {
-    env_logger::init();
+    init();
 
     // Polynomial parameters
     let trace_length = 1024;
@@ -75,6 +79,76 @@ fn test_verify_winter() {
     };
 
     let public_input = vec![Fr::from(1)];
-    let prover = MockProver::run(18, &circuit, vec![public_input]).unwrap();
+    let prover = MockProver::run(20, &circuit, vec![public_input]).unwrap();
     prover.assert_satisfied();
+}
+
+#[test]
+fn test_poseidon_hash() {
+    init();
+
+    #[derive(Default)]
+    struct MyCircuit {}
+
+    const NUM_ADVICE: usize = 6;
+
+    impl<F: FieldExt> Circuit<F> for MyCircuit {
+        type Config = FlexGateConfig<F>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self::default()
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            FlexGateConfig::configure(
+                meta,
+                GateStrategy::PlonkPlus,
+                &[NUM_ADVICE],
+                1,
+                "default".to_string(),
+            )
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+            layouter.assign_region(
+                || "gate",
+                |region| {
+                    let mut ctx = Context::new(
+                        region,
+                        ContextParams {
+                            num_advice: vec![("default".to_string(), NUM_ADVICE)],
+                        },
+                    );
+
+                    // Winterfell digest
+                    let digest_winter = Poseidon::<BaseElement>::hash(&[]);
+                    let mut bytes = F::Repr::default();
+                    for (v, b) in bytes.as_mut().iter_mut().zip(digest_winter.as_bytes()) {
+                        *v = b;
+                    }
+                    let digest_winter = F::from_repr(bytes).unwrap();
+
+                    // Halo2 digest
+                    let mut poseidon_chip = PoseidonChipBn254_8_58::new(&mut ctx, &config);
+                    let digest = poseidon_chip.hash(&mut ctx, &config, &[])?;
+
+                    // Compare digests
+                    digest.to_vec()[0].value().assert_if_known(|x| {
+                        assert_eq!(**x, digest_winter);
+                        true
+                    });
+
+                    Ok(())
+                },
+            )
+        }
+    }
+
+    let circuit = MyCircuit {};
+    MockProver::<Fr>::run(12, &circuit, vec![]).unwrap();
 }

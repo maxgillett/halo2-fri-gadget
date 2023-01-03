@@ -269,15 +269,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "goldilocks"
-version = "0.1.0"
-dependencies = [
- "ff",
- "rand_core",
- "subtle",
-]
-
-[[package]]
 name = "group"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -294,13 +285,13 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "ff",
- "goldilocks",
  "halo2_base",
  "halo2_proofs",
  "hex",
  "itertools",
+ "lazy_static",
  "log",
- "num-bigint",
+ "poseidon 0.2.0",
  "serde",
  "uint",
  "winter-crypto",
@@ -312,18 +303,20 @@ dependencies = [
 [[package]]
 name = "halo2_base"
 version = "0.1.0"
+source = "git+https://github.com/maxgillett/halo2-base?branch=halo2_fri#7f86b14c8a9914cf4fb7fe0e752a0c3e50228439"
 dependencies = [
  "ff",
  "halo2_proofs",
  "num-bigint",
  "num-integer",
  "num-traits",
- "poseidon",
+ "poseidon 0.2.0 (git+https://github.com/maxgillett/poseidon?branch=halo2_fri)",
 ]
 
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=halo2_fri#9f63d4ef2af102355a4a5e9e0eefaeb9ebed776c"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -525,7 +518,16 @@ checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 [[package]]
 name = "poseidon"
 version = "0.2.0"
-source = "git+https://github.com/privacy-scaling-explorations/poseidon?tag=v2022_10_22#5d29df01a95e3df6334080d28e983407f56b5da3"
+dependencies = [
+ "group",
+ "halo2curves",
+ "subtle",
+]
+
+[[package]]
+name = "poseidon"
+version = "0.2.0"
+source = "git+https://github.com/maxgillett/poseidon?branch=halo2_fri#a196a7cdf57d87d48e47ac6584d5501cf0c88579"
 dependencies = [
  "group",
  "halo2curves",

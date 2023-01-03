@@ -1,4 +1,5 @@
 #![feature(int_log)]
+#![feature(array_chunks)]
 
 use std::marker::PhantomData;
 
@@ -17,7 +18,6 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
-use num_bigint::BigUint;
 
 use log::debug;
 
@@ -25,6 +25,10 @@ pub mod fri;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[macro_use]
+extern crate lazy_static;
 
 fn get_root_of_unity<F: FieldExt, const TWO_ADICITY: usize>(n: usize) -> F {
     let r = F::root_of_unity();
@@ -466,7 +470,7 @@ where
 // CIRCUIT
 // =========================================================================
 
-const NUM_ADVICE: usize = 6;
+const NUM_ADVICE: usize = 5;
 
 struct FriVerifierCircuit<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
     pub layer_commitments: Vec<[u8; 32]>,
@@ -615,11 +619,12 @@ fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
             ctx,
             values
                 .iter()
-                .map(|x| {
-                    // TODO: Use F::from_repr instead
-                    let a = BigUint::from_bytes_be(&x[..]).to_string();
-                    let b = F::from_str_vartime(a.as_str()).unwrap();
-                    Witness(Value::known(b))
+                .map(|digest| {
+                    let mut bytes = F::Repr::default();
+                    for (v, b) in bytes.as_mut().iter_mut().zip(digest) {
+                        *v = *b;
+                    }
+                    Witness(Value::known(F::from_repr(bytes).unwrap()))
                 })
                 .collect::<Vec<_>>(),
             vec![],

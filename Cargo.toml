@@ -26,3 +26,4 @@ serde = { version = "1.0", default-features = false }
 itertools = "0.10.5"
 hex = "0.4.3"
 env_logger = "0.10.0"
+rand = "0.8.5"

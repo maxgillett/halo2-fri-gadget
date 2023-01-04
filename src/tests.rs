@@ -125,8 +125,18 @@ fn test_poseidon_hash() {
                         },
                     );
 
+                    // Select 5 random field elements, and concat to bytes vector
+                    let rng = rand::rngs::mock::StepRng::new(42, 1);
+                    let elements = [F::random(rng); 5];
+                    let mut bytes = vec![];
+                    for e in elements.iter() {
+                        for b in e.to_repr().as_ref().iter().cloned() {
+                            bytes.push(b);
+                        }
+                    }
+
                     // Winterfell digest
-                    let digest_winter = Poseidon::<BaseElement>::hash(&[]);
+                    let digest_winter = Poseidon::<BaseElement>::hash(&bytes);
                     let mut bytes = F::Repr::default();
                     for (v, b) in bytes.as_mut().iter_mut().zip(digest_winter.as_bytes()) {
                         *v = b;
@@ -135,7 +145,16 @@ fn test_poseidon_hash() {
 
                     // Halo2 digest
                     let mut poseidon_chip = PoseidonChipBn254_8_58::new(&mut ctx, &config);
-                    let digest = poseidon_chip.hash(&mut ctx, &config, &[])?;
+                    let cells = config.assign_region(
+                        &mut ctx,
+                        elements
+                            .into_iter()
+                            .map(|x| Constant(x))
+                            .collect::<Vec<_>>(),
+                        vec![],
+                        None,
+                    )?;
+                    let digest = poseidon_chip.hash(&mut ctx, &config, &cells)?;
 
                     // Compare digests
                     digest.to_vec()[0].value().assert_if_known(|x| {

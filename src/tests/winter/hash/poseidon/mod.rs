@@ -20,13 +20,12 @@ lazy_static! {
 }
 
 fn poseidon_hash(data: &[[u8; 32]]) -> ByteDigest<32> {
+    let q = data
+        .into_iter()
+        .map(|x| Fr::from_repr(*x).unwrap())
+        .collect::<Vec<_>>();
     let mut hasher = HASHER.lock().unwrap();
-    hasher.update(
-        &data
-            .into_iter()
-            .map(|x| Fr::from_repr(*x).unwrap())
-            .collect::<Vec<_>>()[..],
-    );
+    hasher.update(&q[..]);
     let a = hasher.squeeze();
     hasher.clear();
     ByteDigest::new(<[u8; 32]>::try_from(&a.to_repr()[..]).unwrap())
@@ -43,7 +42,14 @@ impl<B: StarkField> Hasher for Poseidon<B> {
     const COLLISION_RESISTANCE: u32 = 128;
 
     fn hash(bytes: &[u8]) -> Self::Digest {
-        let data = bytes.array_chunks::<32>().cloned().collect::<Vec<_>>();
+        let iter = bytes.array_chunks::<32>();
+        let remainder = iter.remainder();
+        let mut data = iter.cloned().collect::<Vec<_>>();
+        if remainder.len() > 0 {
+            let mut remainder_data = [0u8; 32];
+            remainder_data[0..remainder.len()].copy_from_slice(&remainder);
+            data.push(remainder_data);
+        }
         poseidon_hash(&data)
     }
 

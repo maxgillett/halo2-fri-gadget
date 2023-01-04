@@ -619,13 +619,7 @@ fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
             ctx,
             values
                 .iter()
-                .map(|digest| {
-                    let mut bytes = F::Repr::default();
-                    for (v, b) in bytes.as_mut().iter_mut().zip(digest) {
-                        *v = *b;
-                    }
-                    Witness(Value::known(F::from_repr(bytes).unwrap()))
-                })
+                .map(|digest| Witness(Value::known(from_byte_array(digest))))
                 .collect::<Vec<_>>(),
             vec![],
             None,
@@ -633,4 +627,12 @@ fn assign_digests<F: FieldExt, H: HasherChip<F, Digest = Digest<F, 1>>>(
         .into_iter()
         .map(|x| Digest::from_assigned(vec![x]))
         .collect::<Vec<_>>())
+}
+
+fn from_byte_array<F: FieldExt>(input: &[u8; 32]) -> F {
+    let mut bytes = F::Repr::default();
+    for (v, b) in bytes.as_mut().iter_mut().zip(input.iter()) {
+        *v = *b;
+    }
+    F::from_repr(bytes).unwrap()
 }

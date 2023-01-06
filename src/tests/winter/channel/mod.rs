@@ -47,7 +47,7 @@ impl<B: StarkField, E: FieldElement<BaseField = B>, H: Hasher> DefaultProverChan
             "number of queries must be greater than zero"
         );
         DefaultProverChannel {
-            public_coin: RandomCoin::new(&[1]),
+            public_coin: RandomCoin::new(&[]),
             commitments: Vec::new(),
             domain_size,
             num_queries,
@@ -92,7 +92,10 @@ where
 
     fn draw_fri_alpha(&mut self) -> E {
         let alpha: E = self.public_coin.draw().expect("failed to draw FRI alpha");
-        log::debug!("alpha {}", hex::encode(alpha.as_bytes()));
+        log::debug!(
+            "alpha {}",
+            hex::encode(alpha.as_bytes().iter().cloned().rev().collect::<Vec<_>>())
+        );
         alpha
     }
 }

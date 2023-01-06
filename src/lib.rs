@@ -112,6 +112,7 @@ impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_58<F> {
     ) -> Result<Self::Digest, Error> {
         self.0.update(values);
         let value = self.0.squeeze(ctx, main_chip)?;
+        self.0.clear();
         Ok(Digest([value; 1]))
     }
 }
@@ -157,6 +158,7 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
         let mut contents = self.seed.to_vec();
         contents.append(&mut commitment.to_vec());
         self.seed = hasher_chip.hash(ctx, main_chip, &contents)?;
+        self.counter = main_chip.mul(ctx, &Constant(F::zero()), &Existing(&self.counter))?;
 
         // Reproduce alpha
         contents = self.seed.to_vec();

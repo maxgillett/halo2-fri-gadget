@@ -58,8 +58,11 @@ fn test_verify_winter() {
     };
 
     let seed = Poseidon::<BaseElement>::hash(&[]);
-    let public_coin_seed =
-        Fr::from_repr(<[u8; 32]>::try_from(&seed.as_bytes()[..]).unwrap()).unwrap();
+    let mut bytes = [0u8; 32];
+    for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
+        *v = b;
+    }
+    let public_coin_seed = Fr::from_repr(bytes).unwrap();
 
     let circuit = FriVerifierCircuit::<
         Fr,

@@ -42,6 +42,7 @@ fn get_root_of_unity<F: FieldExt, const TWO_ADICITY: usize>(n: usize) -> F {
 struct FriProof<F: FieldExt, H: HasherChip<F>> {
     pub layer_commitments: Vec<H::Digest>,
     pub queries: Vec<FriQuery<F, H>>,
+    pub remainders: Vec<AssignedValue<F>>,
     pub options: FriOptions,
 }
 
@@ -176,6 +177,24 @@ struct MerkleTreeChip<F: FieldExt, H: HasherChip<F>> {
 }
 
 impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
+    fn get_root(
+        ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        range_chip: &RangeConfig<F>,
+        leaves: &[AssignedValue<F>],
+    ) -> Result<AssignedValue<F>, Error> {
+        let mut hasher = H::new(ctx, main_chip);
+        let depth = leaves.len().ilog2();
+        let mut nodes = leaves.to_vec();
+        for _ in 0..depth {
+            nodes = nodes
+                .chunks(2)
+                .map(|pair| hasher.hash(ctx, main_chip, pair).unwrap().to_vec()[0].clone())
+                .collect::<Vec<_>>();
+        }
+        Ok(nodes[0].clone())
+    }
+
     fn verify_merkle_proof(
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
@@ -211,7 +230,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
         }
 
         for (e1, e2) in root.to_vec().iter().zip(digest.to_vec().iter()) {
-            range_chip.is_equal(ctx, &Existing(e1), &Existing(e2))?;
+            main_chip.assert_equal(ctx, &Existing(e1), &Existing(e2))?;
         }
 
         Ok(())
@@ -381,16 +400,43 @@ where
                 x = main_chip.pow(ctx, &Existing(&x), folding_factor)?;
             }
 
-            // TODO
-            self.verify_remainder(ctx, vec![], self.proof.options.max_remainder_degree);
+            // Check that the claimed remainder is equal to the final evaluation
+            // FIXME: Select the index at the queried position (set to a dummy index of zero right now)
+            // and constrain that the correct index was used
+            let remainder = &self.proof.remainders[0];
+            main_chip.assert_equal(
+                ctx,
+                &Existing(&previous_eval.unwrap()),
+                &Existing(&remainder),
+            )?;
         }
+
+        // Check that a Merkle tree of the claimed remainders hash to the final layer commitment
+        let remainder_commitment = self.proof.layer_commitments.last().unwrap().to_vec()[0].clone();
+        let remainder_digests = self
+            .proof
+            .remainders
+            .chunks(folding_factor)
+            .map(|values| {
+                let digest = hasher_chip.hash(ctx, main_chip, &values).unwrap();
+                digest.to_vec()[0].clone()
+            })
+            .collect::<Vec<_>>();
+        let root =
+            MerkleTreeChip::<F, H>::get_root(ctx, main_chip, range_chip, &remainder_digests)?;
+        main_chip.assert_equal(ctx, &Existing(&root), &Existing(&remainder_commitment))?;
+
+        self.verify_remainder_degree(
+            ctx,
+            &self.proof.remainders,
+            self.proof.options.max_remainder_degree,
+        );
 
         Ok(())
     }
 
     /// Reconstruct the alphas used at each step of the FRI commit phase using the
     /// Merkle commitments for the layers.
-    #[allow(unused)]
     fn draw_alphas(
         &self,
         ctx: &mut Context<'_, F>,
@@ -457,11 +503,10 @@ where
 
     /// Interpolate the remainder evaluations into a polynomial, and check that its degree
     /// is less than or equal to `max_degree`.
-    #[allow(unused)]
-    fn verify_remainder(
+    fn verify_remainder_degree(
         &self,
         ctx: &mut Context<'_, F>,
-        remainder_evaluations: Vec<F>,
+        remainder_evaluations: &[AssignedValue<F>],
         max_degree: usize,
     ) {
         // TODO
@@ -536,9 +581,15 @@ where
                 );
 
                 // Assign witness cells
-                // TODO: Refactor:
-                // - Use a single assign call, and split returned cells?
-                // - Create helper functions to minimize boilerplate
+                let remainders = config.main_chip.assign_region(
+                    &mut ctx,
+                    self.remainder
+                        .iter()
+                        .map(|r| Witness(Value::known(*r)))
+                        .collect::<Vec<_>>(),
+                    vec![],
+                    None,
+                )?;
                 let layer_commitments =
                     assign_digests::<F, H>(&mut ctx, &config.main_chip, &self.layer_commitments)?;
                 let positions = config.main_chip.assign_region(
@@ -592,6 +643,7 @@ where
                 let verifier_chip = VerifierChip::<F, H, C>::new(FriProof {
                     layer_commitments,
                     queries,
+                    remainders,
                     options: self.options,
                 })?;
 

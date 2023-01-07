@@ -11,7 +11,6 @@ debug = true
 #goldilocks = { path = "../halo2-ce/arithmetic/goldilocks" }
 halo2_proofs = { git = "https://github.com/maxgillett/halo2-ce", branch = "halo2_fri" }
 halo2_base = { git = "https://github.com/maxgillett/halo2-base", branch = "halo2_fri" }
-ff = "0.12.0"
 log = "0.4.17"
 lazy_static = "1.4.0"
 
@@ -21,6 +20,7 @@ winter-math = { git = "https://github.com/facebook/winterfell.git" }
 winter-crypto = { git = "https://github.com/facebook/winterfell.git" }
 winter-utils = { git = "https://github.com/facebook/winterfell.git" }
 poseidon = { git = "https://github.com/maxgillett/poseidon", branch = "halo2_fri" }
+ff = "0.12.0"
 uint = "0.9.3"
 serde = { version = "1.0", default-features = false }
 itertools = "0.10.5"

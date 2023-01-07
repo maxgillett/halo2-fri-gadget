@@ -14,7 +14,7 @@ use halo2_base::{
     QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{
-    arithmetic::FieldExt,
+    arithmetic::{best_fft, FieldExt},
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
@@ -43,6 +43,7 @@ struct FriProof<F: FieldExt, H: HasherChip<F>> {
     pub layer_commitments: Vec<H::Digest>,
     pub queries: Vec<FriQuery<F, H>>,
     pub remainders: Vec<AssignedValue<F>>,
+    pub remainders_poly: Vec<AssignedValue<F>>,
     pub options: FriOptions,
 }
 
@@ -180,7 +181,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
     fn get_root(
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
-        range_chip: &RangeConfig<F>,
+        _range_chip: &RangeConfig<F>,
         leaves: &[AssignedValue<F>],
     ) -> Result<AssignedValue<F>, Error> {
         let mut hasher = H::new(ctx, main_chip);
@@ -198,7 +199,7 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
     fn verify_merkle_proof(
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
-        range_chip: &RangeConfig<F>,
+        _range_chip: &RangeConfig<F>,
         root: &H::Digest,
         index_bits: &[AssignedValue<F>],
         leaves: &[AssignedValue<F>],
@@ -428,9 +429,12 @@ where
 
         self.verify_remainder_degree(
             ctx,
+            main_chip,
+            hasher_chip,
             &self.proof.remainders,
+            &self.proof.remainders_poly,
             self.proof.options.max_remainder_degree,
-        );
+        )?;
 
         Ok(())
     }
@@ -445,14 +449,7 @@ where
         initial_seed: H::Digest,
         commitments: &[H::Digest],
     ) -> Result<Vec<H::Digest>, Error> {
-        let counter = main_chip.assign_region_smart(
-            ctx,
-            vec![Constant(F::from(0))],
-            vec![],
-            vec![],
-            vec![],
-        )?[0]
-            .clone();
+        let counter = main_chip.load_zero(ctx)?;
         let mut public_coin_chip = C::new(initial_seed, counter);
         let mut alphas = vec![];
         for commitment in commitments {
@@ -506,11 +503,129 @@ where
     fn verify_remainder_degree(
         &self,
         ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        hasher_chip: &mut H,
         remainder_evaluations: &[AssignedValue<F>],
+        remainder_polynomial: &[AssignedValue<F>],
         max_degree: usize,
-    ) {
-        // TODO
-        unimplemented!()
+    ) -> Result<(), Error> {
+        // Use the commitment to the remainder polynomial and evaluations to draw a random
+        // field element tau
+        let mut contents = remainder_polynomial.to_vec();
+        contents.push(self.proof.layer_commitments.last().unwrap().to_vec()[0].clone());
+        let tau = hasher_chip.hash(ctx, main_chip, &contents)?.to_vec()[0].clone();
+
+        // Evaluate both polynomial representations at tau and confirm agreement
+        let a = self.horner_eval(ctx, main_chip, remainder_polynomial, &tau)?;
+        let b = self.lagrange_eval(ctx, main_chip, remainder_evaluations, &tau)?;
+        main_chip.assert_equal(ctx, &Existing(&a), &Existing(&b))?;
+
+        // Check that all polynomial coefficients greater than 'max_degree' are zero
+        for value in remainder_polynomial.iter().skip(max_degree) {
+            main_chip.assert_equal(ctx, &Existing(&value), &Constant(F::zero()))?;
+        }
+
+        Ok(())
+    }
+
+    fn horner_eval(
+        &self,
+        ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        coefficients: &[AssignedValue<F>],
+        x: &AssignedValue<F>,
+    ) -> Result<AssignedValue<F>, Error> {
+        Ok(coefficients.iter().rev().skip(1).fold(
+            coefficients.last().unwrap().clone(),
+            |prod, coeff| {
+                main_chip
+                    .mul_add(ctx, &Existing(&x), &Existing(&prod), &Existing(&coeff))
+                    .unwrap()
+            },
+        ))
+    }
+
+    fn lagrange_eval(
+        &self,
+        ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        evaluations: &[AssignedValue<F>],
+        x: &AssignedValue<F>,
+    ) -> Result<AssignedValue<F>, Error> {
+        let n = evaluations.len();
+
+        // Roots of unity (w_i) for remainder evaluation domain
+        let omega_n = get_root_of_unity::<F, 28>(n);
+        let omega_i = (0..n)
+            .map(|i| {
+                let mut x = [0u64; 4];
+                x[0] = i as u64;
+                omega_n.pow(&x)
+            })
+            .collect::<Vec<_>>();
+
+        // Numerator: num_j = \prod_{k \neq j} x - w_k
+        let x_minus_xk = (0..n)
+            .map(|i| {
+                main_chip
+                    .mul(ctx, &Existing(x), &Constant(omega_i[i]))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let numer = (0..n)
+            .map(|i| {
+                (0..n)
+                    .filter(|j| i != *j)
+                    .fold(None, |acc, j| {
+                        if let Some(prod) = acc {
+                            main_chip
+                                .mul(ctx, &Existing(&x_minus_xk[j]), &Existing(&prod))
+                                .ok()
+                        } else {
+                            Some(x_minus_xk[j].clone())
+                        }
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // Denominator: den_j = \prod_{k \neq j} w_j - w_k
+        let denom = (0..n)
+            .map(|i| {
+                (0..n)
+                    .filter(|j| i != *j)
+                    .fold(None, |acc, j| {
+                        if let Some(prod) = acc {
+                            Some(omega_i[j] * prod)
+                        } else {
+                            Some(omega_i[j])
+                        }
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // Lagrange bases: l_j(x) = num_j / den_j
+        let l_j = (0..n)
+            .map(|j| {
+                main_chip
+                    .mul(
+                        ctx,
+                        &Existing(&numer[j]),
+                        &Constant(denom[j].invert().unwrap()),
+                    )
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        // Polynomial evaluation: \sum_j evaluations_j * l_j
+        Ok(main_chip
+            .inner_product(
+                ctx,
+                &evaluations.iter().map(Existing).collect::<Vec<_>>(),
+                &l_j.iter().map(Existing).collect::<Vec<_>>(),
+            )?
+            .2)
     }
 }
 
@@ -580,10 +695,25 @@ where
                     },
                 );
 
+                // Remainder polynomial
+                let k = self.remainder.len().ilog2();
+                let omega_inv = get_root_of_unity::<F, 28>(k as usize).invert().unwrap();
+                let mut remainders_poly = self.remainder.clone();
+                best_fft(&mut remainders_poly, omega_inv, k);
+
                 // Assign witness cells
                 let remainders = config.main_chip.assign_region(
                     &mut ctx,
                     self.remainder
+                        .iter()
+                        .map(|r| Witness(Value::known(*r)))
+                        .collect::<Vec<_>>(),
+                    vec![],
+                    None,
+                )?;
+                let remainders_poly = config.main_chip.assign_region(
+                    &mut ctx,
+                    remainders_poly
                         .iter()
                         .map(|r| Witness(Value::known(*r)))
                         .collect::<Vec<_>>(),
@@ -644,6 +774,7 @@ where
                     layer_commitments,
                     queries,
                     remainders,
+                    remainders_poly,
                     options: self.options,
                 })?;
 

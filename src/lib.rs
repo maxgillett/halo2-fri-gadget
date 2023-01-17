@@ -341,21 +341,21 @@ where
                 self.range()
                     .num_to_bits(ctx, &self.proof.queries[n].position, 28)?;
 
-            // Compute the field element at the queried position
+            // Compute the field element coordinate at the queried position
+            // g: domain offset
+            // omega: domain generator
+            // x: omega^position * g
             let g = F::multiplicative_generator();
             let omega = get_root_of_unity::<F, 28>(log_degree);
-            let omega_i =
-                self.gate()
-                    .pow_bits(ctx, omega, &position_bits.iter().map(Existing).collect())?;
+            let omega_i = self.pow_bits(ctx, omega, &position_bits)?;
             let mut x = self.gate().mul(ctx, &Constant(g), &Existing(&omega_i))?;
 
-            // Compute the folded roots of unity
+            // Compute the folded roots of unity:
+            // omega_folded: {omega^|D_i|} where D_i is the folded domain
             let omega_folded = (1..folding_factor)
                 .map(|i| {
                     let new_domain_size = 2usize.pow(log_degree as u32) / folding_factor * i;
-                    self.gate()
-                        .pow(ctx, &Existing(&omega_i), new_domain_size)
-                        .unwrap()
+                    omega.pow_vartime([new_domain_size as u64])
                 })
                 .collect::<Vec<_>>();
 
@@ -399,7 +399,7 @@ where
                 let x_folded = (0..folding_factor - 1)
                     .map(|i| {
                         self.gate()
-                            .mul(ctx, &Existing(&x), &Existing(&omega_folded[i]))
+                            .mul(ctx, &Existing(&x), &Constant(omega_folded[i]))
                             .unwrap()
                     })
                     .collect::<Vec<_>>();
@@ -637,6 +637,32 @@ where
                 &l_j.iter().map(Existing).collect::<Vec<_>>(),
             )?
             .2)
+    }
+
+    /// Compute \prod_{i \neq 0} bits_i * base^i
+    fn pow_bits(
+        &self,
+        ctx: &mut Context<'_, F>,
+        base: F,
+        bits: &Vec<AssignedValue<F>>,
+    ) -> Result<AssignedValue<F>, Error> {
+        let mut product =
+            self.gate()
+                .assign_region(ctx, vec![Constant(F::from(1))], vec![], None)?[0]
+                .clone();
+        for (i, bit) in bits.iter().enumerate() {
+            let a = self.gate().mul(
+                ctx,
+                &Existing(bit),
+                &Constant(F::from(base.pow_vartime(&[1 << i]))),
+            )?;
+            let is_zero = self.range().is_zero(ctx, &a)?;
+            let b =
+                self.gate()
+                    .select(ctx, &Constant(F::one()), &Existing(&a), &Existing(&is_zero))?;
+            product = self.gate().mul(ctx, &Existing(&product), &Existing(&b))?;
+        }
+        Ok(product)
     }
 }
 

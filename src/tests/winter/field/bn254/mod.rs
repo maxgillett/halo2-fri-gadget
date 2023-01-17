@@ -33,12 +33,12 @@ const M: U256 = U256([
     3486998266802970665,
 ]);
 
-// 2^32 root of unity = 0x2a3c09f0a58a7e8500e0a7eb8ef62abc402d111e41112ed49bd61b6e725b19f0
+// 2^28 root of unity = 0x3ddb9f5166d18b798865ea93dd31f743215cf6dd39329c8d34f1ed960c37c9c
 const G: U256 = U256([
-    11229192882073836016,
-    4624371214017703636,
-    63235024940837564,
-    3043318377369730693,
+    0xd34f1ed960c37c9c,
+    0x3215cf6dd39329c8,
+    0x98865ea93dd31f74,
+    0x03ddb9f5166d18b7,
 ]);
 
 // Number of bytes needed to represent field element
@@ -123,7 +123,7 @@ impl StarkField for BaseElement {
 
     const MODULUS_BITS: u32 = 256;
 
-    const GENERATOR: Self = BaseElement(U256([5, 0, 0, 0]));
+    const GENERATOR: Self = BaseElement(U256([7, 0, 0, 0]));
 
     const TWO_ADICITY: u32 = 28;
     const TWO_ADIC_ROOT_OF_UNITY: Self = BaseElement(G);
@@ -398,6 +398,12 @@ impl BaseElement {
     pub fn to_le_bytes(&self) -> [u8; 32] {
         let mut bytes = [0u8; 32];
         self.0.to_little_endian(&mut bytes);
+        bytes
+    }
+
+    pub fn to_be_bytes(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        self.0.to_big_endian(&mut bytes);
         bytes
     }
 

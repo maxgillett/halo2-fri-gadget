@@ -336,8 +336,9 @@ where
             .collect::<Vec<_>>();
 
         // Execute the FRI verification protocol for each query round
+        // Note that this is hardcoded for a folding factor of 2 right now.
         for n in 0..self.num_queries() {
-            let mut position_bits =
+            let position_bits =
                 self.range()
                     .num_to_bits(ctx, &self.proof.queries[n].position, 28)?;
 
@@ -380,13 +381,6 @@ where
                 )?;
                 let evaluations = vec![a, b];
 
-                // Fold position
-                let folded_position_bits = position_bits
-                    .iter()
-                    .cloned()
-                    .dropping_back(folded_domain_bits[i])
-                    .collect_vec();
-
                 // Verify that evaluations reside at the folded position in the Merkle tree
                 // TODO: We should be keeping track of which positions we have already
                 // authenticated, and only verify new positions.
@@ -421,16 +415,40 @@ where
                     Some(self.evaluate_polynomial(ctx, &x, &x_folded, &evaluations, &alphas[i])?);
 
                 // Update variables for the next layer
-                position_bits = folded_position_bits;
                 omega_i = self
                     .gate()
                     .mul(ctx, &Existing(&omega_i), &Existing(&omega_i))?;
             }
 
             // Check that the claimed remainder is equal to the final evaluation
-            // FIXME: Select the index at the queried position (set to a dummy index of zero right now)
-            // and constrain that the correct index was used
-            let remainder = &self.proof.remainders[0];
+            // Compute the remainder index
+            let mut index = self.gate().load_zero(ctx)?;
+            for i in 0..self.proof.options.max_remainder_degree.ilog2() {
+                index = self.gate().mul_add(
+                    ctx,
+                    &Existing(&position_bits[i as usize]),
+                    &Constant(F::from(2usize.pow(i) as u64)),
+                    &Existing(&index),
+                )?;
+            }
+            let indicator = self.gate().idx_to_indicator(
+                ctx,
+                &Existing(&index),
+                self.proof.options.max_remainder_degree,
+            )?;
+            let remainder = self
+                .gate()
+                .inner_product(
+                    ctx,
+                    &indicator.iter().map(|x| Existing(x)).collect::<Vec<_>>(),
+                    &self
+                        .proof
+                        .remainders
+                        .iter()
+                        .map(|x| Existing(x))
+                        .collect::<Vec<_>>(),
+                )?
+                .2;
             ctx.region
                 .constrain_equal(previous_eval.unwrap().cell(), remainder.cell())?;
         }

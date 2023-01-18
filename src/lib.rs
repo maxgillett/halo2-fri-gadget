@@ -347,8 +347,7 @@ where
             // x: omega^position * g
             let g = F::multiplicative_generator();
             let omega = get_root_of_unity::<F, 28>(log_degree);
-            let omega_i = self.pow_bits(ctx, omega, &position_bits)?;
-            let mut x = self.gate().mul(ctx, &Constant(g), &Existing(&omega_i))?;
+            let mut omega_i = self.pow_bits(ctx, omega, &position_bits)?;
 
             // Compute the folded roots of unity:
             // omega_folded: {omega^|D_i|} where D_i is the folded domain
@@ -362,18 +361,31 @@ where
             let mut previous_eval: Option<AssignedValue<F>> = None;
 
             for i in 0..self.num_layers() - 1 {
-                let evaluations = self.proof.queries[n].layers[i].evaluations.clone();
+                let x = self.gate().mul(ctx, &Constant(g), &Existing(&omega_i))?;
+
+                // Swap the evaluation points if the folded point is in the second half of the domain
+                let evaluations_raw = self.proof.queries[n].layers[i].evaluations.clone();
+                let swap_bit = position_bits[log_degree - i - 1].clone();
+                let a = self.gate().select(
+                    ctx,
+                    &Existing(&evaluations_raw[0]),
+                    &Existing(&evaluations_raw[1]),
+                    &Existing(&swap_bit),
+                )?;
+                let b = self.gate().select(
+                    ctx,
+                    &Existing(&evaluations_raw[1]),
+                    &Existing(&evaluations_raw[0]),
+                    &Existing(&swap_bit),
+                )?;
+                let evaluations = vec![a, b];
 
                 // Fold position
-                let folded_position_bits = if i == 0 {
-                    // Do not fold the first layer
-                    position_bits.to_vec()
-                } else {
-                    position_bits
-                        .into_iter()
-                        .dropping_back(folded_domain_bits[i])
-                        .collect_vec()
-                };
+                let folded_position_bits = position_bits
+                    .iter()
+                    .cloned()
+                    .dropping_back(folded_domain_bits[i])
+                    .collect_vec();
 
                 // Verify that evaluations reside at the folded position in the Merkle tree
                 // TODO: We should be keeping track of which positions we have already
@@ -383,16 +395,15 @@ where
                     self.gate(),
                     hasher_chip,
                     &layer_commitments[i],
-                    &folded_position_bits,
-                    &evaluations,
+                    &position_bits,
+                    &evaluations_raw,
                     &self.proof.queries[n].layers[i].merkle_proof,
                 )?;
 
                 // Compare previous polynomial evaluation and current layer evaluation
                 if let Some(eval) = previous_eval {
-                    // FIXME: Use correct index for evaluations
                     ctx.region
-                        .constrain_equal(eval.cell(), evaluations[0].cell())?;
+                        .constrain_equal(eval.cell(), evaluations[1].cell())?;
                 }
 
                 // Compute the remaining x-coordinates for the given layer
@@ -411,7 +422,9 @@ where
 
                 // Update variables for the next layer
                 position_bits = folded_position_bits;
-                x = self.gate().pow(ctx, &Existing(&x), folding_factor)?;
+                omega_i = self
+                    .gate()
+                    .mul(ctx, &Existing(&omega_i), &Existing(&omega_i))?;
             }
 
             // Check that the claimed remainder is equal to the final evaluation

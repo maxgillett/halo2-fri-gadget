@@ -10,10 +10,11 @@ debug = true
 [dependencies]
 #goldilocks = { path = "../halo2-ce/arithmetic/goldilocks" }
 halo2_proofs = { git = "https://github.com/maxgillett/halo2-ce", branch = "halo2_fri" }
-halo2_base = { git = "https://github.com/maxgillett/halo2-base", branch = "halo2_fri" }
-itertools = "0.10.5"
+#halo2_base = { git = "https://github.com/maxgillett/halo2-base", branch = "halo2_fri" }
+halo2_base = { path = "../halo2-base" }
 log = "0.4.17"
 lazy_static = "1.4.0"
+rand_core = { version = "0.6", default-features = false }
 
 [dev-dependencies]
 winter-fri = { git = "https://github.com/facebook/winterfell.git" }

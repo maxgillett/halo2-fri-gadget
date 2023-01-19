@@ -293,6 +293,7 @@ dependencies = [
  "log",
  "poseidon",
  "rand",
+ "rand_core",
  "serde",
  "uint",
  "winter-crypto",
@@ -304,7 +305,6 @@ dependencies = [
 [[package]]
 name = "halo2_base"
 version = "0.1.0"
-source = "git+https://github.com/maxgillett/halo2-base?branch=halo2_fri#15323cae88f180fcc6d5e6325e19b551ddf23752"
 dependencies = [
  "ff",
  "halo2_proofs",

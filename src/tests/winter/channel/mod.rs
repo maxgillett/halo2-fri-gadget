@@ -91,11 +91,6 @@ where
     }
 
     fn draw_fri_alpha(&mut self) -> E {
-        let alpha: E = self.public_coin.draw().expect("failed to draw FRI alpha");
-        log::debug!(
-            "alpha {}",
-            hex::encode(alpha.as_bytes().iter().cloned().rev().collect::<Vec<_>>())
-        );
-        alpha
+        self.public_coin.draw().expect("failed to draw FRI alpha")
     }
 }

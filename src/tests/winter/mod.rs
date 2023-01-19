@@ -127,12 +127,12 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
         .enumerate()
         .map(|(i, position)| {
             let layers = (0..layer_queries.len())
-                .map(|j| fri::QueryLayerWitness {
+                .map(|j| FriQueryLayerWitness {
                     evaluations: layer_queries[j][i].clone(),
                     merkle_proof: layer_merkle_proofs[j][i].clone(),
                 })
                 .collect();
-            fri::QueryWitness { position, layers }
+            FriQueryWitness { position, layers }
         })
         .collect::<Vec<_>>();
 

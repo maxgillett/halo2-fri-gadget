@@ -16,11 +16,8 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::*,
 };
-use itertools::Itertools;
 use log::debug;
 use std::marker::PhantomData;
-
-pub mod fri;
 
 #[cfg(test)]
 mod tests;
@@ -35,7 +32,29 @@ fn get_root_of_unity<F: FieldExt, const TWO_ADICITY: usize>(n: usize) -> F {
     r.pow_vartime(&[s])
 }
 
-// FRI PROTOCOL PARAMS
+// FRI PROTOCOL INPUTS
+// =========================================================================
+
+#[derive(Clone)]
+pub struct FriQueryWitness<F: FieldExt> {
+    pub position: usize,
+    pub layers: Vec<FriQueryLayerWitness<F>>,
+}
+
+#[derive(Clone)]
+pub struct FriQueryLayerWitness<F: FieldExt> {
+    pub evaluations: Vec<F>,
+    pub merkle_proof: Vec<[u8; 32]>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FriOptions {
+    pub folding_factor: usize,
+    pub max_remainder_degree: usize,
+    pub log_degree: usize,
+}
+
+// FRI PROTOCOL ASSIGNMENTS
 // =========================================================================
 
 struct FriProofAssigned<F: FieldExt, H: HasherChip<F>> {
@@ -54,13 +73,6 @@ struct FriQueryAssigned<F: FieldExt, H: HasherChip<F>> {
 struct FriQueryLayerAssigned<F: FieldExt, H: HasherChip<F>> {
     pub evaluations: Vec<AssignedValue<F>>,
     pub merkle_proof: Vec<H::Digest>,
-}
-
-#[derive(Clone, Copy, Default)]
-struct FriOptions {
-    pub folding_factor: usize,
-    pub max_remainder_degree: usize,
-    pub log_degree: usize,
 }
 
 // HASHER CHIP
@@ -95,6 +107,7 @@ impl<F: FieldExt, const N: usize> HasherChipDigest<F> for Digest<F, N> {
     }
 }
 
+#[derive(Clone)]
 struct PoseidonChipBn254_8_58<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 4, 3>);
 
 // TODO: Implement Goldilocks-friendly Poseidon implementation
@@ -133,6 +146,7 @@ trait RandomCoinChip<F: FieldExt, H: HasherChip<F>> {
     ) -> Result<H::Digest, Error>;
 }
 
+#[derive(Clone)]
 struct RandomCoin<F: FieldExt, H: HasherChip<F>> {
     pub seed: H::Digest,
     pub counter: AssignedValue<F>,
@@ -277,14 +291,14 @@ where
             main_chip: FlexGateConfig::configure(
                 meta,
                 GateStrategy::PlonkPlus,
-                &[NUM_ADVICE],
+                &[NUM_ADVICE_GATE],
                 1,
                 "default".to_string(),
             ),
             range_chip: RangeConfig::configure(
                 meta,
                 RangeStrategy::PlonkPlus,
-                &[NUM_ADVICE],
+                &[NUM_ADVICE_RANGE],
                 &[1],
                 1,
                 3,
@@ -326,17 +340,9 @@ where
             public_coin_seed,
             &self.proof.layer_commitments,
         )?;
-        for alpha in alphas.iter() {
-            debug!("alpha {:?}", alpha.to_assigned()[0].value());
-        }
-
-        // Determine domain bit size for each layer
-        let folded_domain_bits = (0..self.num_layers())
-            .map(|_| folding_factor.ilog2() as usize)
-            .collect::<Vec<_>>();
 
         // Execute the FRI verification protocol for each query round
-        // Note that this is hardcoded for a folding factor of 2 right now.
+        // NOTE: this is hardcoded for a folding factor of 2 right now.
         for n in 0..self.num_queries() {
             let position_bits =
                 self.range()
@@ -382,8 +388,6 @@ where
                 let evaluations = vec![a, b];
 
                 // Verify that evaluations reside at the folded position in the Merkle tree
-                // TODO: We should be keeping track of which positions we have already
-                // authenticated, and only verify new positions.
                 MerkleTreeChip::<F, H>::verify_merkle_proof(
                     ctx,
                     self.gate(),
@@ -420,8 +424,8 @@ where
                     .mul(ctx, &Existing(&omega_i), &Existing(&omega_i))?;
             }
 
-            // Check that the claimed remainder is equal to the final evaluation
-            // Compute the remainder index
+            // Check that the claimed remainder is equal to the final evaluation.
+            // 1. Compute the remainder index
             let mut index = self.gate().load_zero(ctx)?;
             for i in 0..self.proof.options.max_remainder_degree.ilog2() {
                 index = self.gate().mul_add(
@@ -436,6 +440,7 @@ where
                 &Existing(&index),
                 self.proof.options.max_remainder_degree,
             )?;
+            // 2. Select the remainder at the computed index
             let remainder = self
                 .gate()
                 .inner_product(
@@ -454,14 +459,22 @@ where
         }
 
         // Check that a Merkle tree of the claimed remainders hash to the final layer commitment
+        // NOTE: This is hardcoded for a folding factor of 2
         let remainder_commitment =
             self.proof.layer_commitments.last().unwrap().to_assigned()[0].clone();
-        let remainder_digests = self
-            .proof
-            .remainders
-            .chunks(folding_factor)
+        let remainder_digests = self.proof.remainders
+            [..self.proof.options.max_remainder_degree / 2]
+            .iter()
+            .cloned()
+            .zip(
+                self.proof.remainders[self.proof.options.max_remainder_degree / 2..]
+                    .iter()
+                    .cloned(),
+            )
             .map(|values| {
-                let digest = hasher_chip.hash(ctx, self.gate(), &values).unwrap();
+                let digest = hasher_chip
+                    .hash(ctx, self.gate(), &[values.0, values.1])
+                    .unwrap();
                 digest.to_assigned()[0].clone()
             })
             .collect::<Vec<_>>();
@@ -470,6 +483,7 @@ where
         ctx.region
             .constrain_equal(root.cell(), remainder_commitment.cell())?;
 
+        // Ensure that the interpolated remainder polynomial is of degree <= max_remainder_degree
         self.verify_remainder_degree(
             ctx,
             hasher_chip,
@@ -551,6 +565,8 @@ where
     ) -> Result<(), Error> {
         // Use the commitment to the remainder polynomial and evaluations to draw a random
         // field element tau
+        // TODO: Should we use the multi-phase constraint system to draw the randomness
+        // instead here? Is it cheaper?
         let mut contents = remainder_polynomial.to_vec();
         contents.push(self.proof.layer_commitments.last().unwrap().to_assigned()[0].clone());
         let tau = hasher_chip.hash(ctx, self.gate(), &contents)?.to_assigned()[0].clone();
@@ -596,7 +612,8 @@ where
         let n = evaluations.len();
 
         // Roots of unity (w_i) for remainder evaluation domain
-        let omega_n = get_root_of_unity::<F, 28>(n);
+        let k = n.ilog2();
+        let omega_n = get_root_of_unity::<F, 28>(k as usize);
         let omega_i = (0..n)
             .map(|i| {
                 let mut x = [0u64; 4];
@@ -609,7 +626,7 @@ where
         let x_minus_xk = (0..n)
             .map(|i| {
                 self.gate()
-                    .mul(ctx, &Existing(x), &Constant(omega_i[i]))
+                    .sub(ctx, &Existing(x), &Constant(omega_i[i]))
                     .unwrap()
             })
             .collect::<Vec<_>>();
@@ -632,14 +649,14 @@ where
 
         // Denominator: den_j = \prod_{k \neq j} w_j - w_k
         let denom = (0..n)
-            .map(|i| {
+            .map(|j| {
                 (0..n)
-                    .filter(|j| i != *j)
-                    .fold(None, |acc, j| {
+                    .filter(|k| *k != j)
+                    .fold(None, |acc, k| {
                         if let Some(prod) = acc {
-                            Some(omega_i[j] * prod)
+                            Some((omega_i[j] - omega_i[k]) * prod)
                         } else {
-                            Some(omega_i[j])
+                            Some(omega_i[j] - omega_i[k])
                         }
                     })
                     .unwrap()
@@ -700,11 +717,13 @@ where
 // CIRCUIT
 // =========================================================================
 
-const NUM_ADVICE: usize = 4;
+const NUM_ADVICE_GATE: usize = 60;
+const NUM_ADVICE_RANGE: usize = 40;
 
+#[derive(Clone)]
 struct FriVerifierCircuit<F: FieldExt, H: HasherChip<F>, C: RandomCoinChip<F, H>> {
     pub layer_commitments: Vec<[u8; 32]>,
-    pub queries: Vec<fri::QueryWitness<F>>,
+    pub queries: Vec<FriQueryWitness<F>>,
     pub remainder: Vec<F>,
     pub options: FriOptions,
     pub public_coin_seed: F,
@@ -754,13 +773,24 @@ where
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
+
         layouter.assign_region(
             || "gate",
             |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
                 let mut ctx = Context::new(
                     region,
                     ContextParams {
-                        num_advice: vec![("default".to_string(), NUM_ADVICE)],
+                        num_advice: vec![(
+                            "default".to_string(),
+                            NUM_ADVICE_GATE + NUM_ADVICE_RANGE,
+                        )],
                     },
                 );
 
@@ -769,6 +799,10 @@ where
                 let omega_inv = get_root_of_unity::<F, 28>(k as usize).invert().unwrap();
                 let mut remainders_poly = self.remainder.clone();
                 best_fft(&mut remainders_poly, omega_inv, k);
+                let n_inv = F::from(remainders_poly.len() as u64).invert().unwrap();
+                for coeff in remainders_poly.iter_mut() {
+                    *coeff = *coeff * n_inv;
+                }
 
                 // Assign witness cells
                 let remainders = config.main_chip.assign_region(

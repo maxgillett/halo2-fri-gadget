@@ -305,6 +305,7 @@ dependencies = [
 [[package]]
 name = "halo2_base"
 version = "0.1.0"
+source = "git+https://github.com/maxgillett/halo2-base?branch=halo2_fri#4a6c732d32e08957939a65a676079c9693dd6015"
 dependencies = [
  "ff",
  "halo2_proofs",

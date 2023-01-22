@@ -1,12 +1,11 @@
 use super::*;
 use ff::PrimeField;
 use halo2_proofs::dev::MockProver;
-use halo2_proofs::halo2curves::bn256::Fr;
 use std::time::Instant;
 use winter_crypto::{Digest, Hasher};
 use winter_fri::FriOptions as WinterFriOptions;
+use winter_math::fields::{f64::BaseElement as F64, QuadExtension};
 
-use halo2_proofs::halo2curves::bn256::Bn256;
 use halo2_proofs::plonk::{
     create_proof as create_plonk_proof, keygen_pk, keygen_vk, verify_proof as verify_plonk_proof,
     Circuit, ConstraintSystem, Error,
@@ -22,27 +21,32 @@ use rand_core::OsRng;
 
 mod winter;
 use winter::eval_rand_polynomial;
-use winter::field::bn254::BaseElement;
-use winter::hash::poseidon::Poseidon;
+use winter::field::bn254::BaseElement as BN254;
+use winter::field::FP64;
+use winter::hash::poseidon_bn254::Poseidon as Poseidon256;
+use winter::hash::poseidon_fp64::Poseidon as Poseidon64;
 
-// TODO: Test with Goldilocks
-//use halo2_arithmetic::goldilocks;
-//use winter_math::fields::f64::BaseElement;
+use goldilocks::fp::Goldilocks as Fp;
+use goldilocks::fp2::GoldilocksExtension as Fp2;
+use halo2_proofs::halo2curves::bn256::{Bn256, Fr};
 
 type LayerCommitments = Vec<[u8; 32]>;
-type Query = FriQueryWitness<Fr>;
-type Remainder = Vec<Fr>;
+type Query<F> = FriQueryWitness<F>;
+type Remainder<F> = Vec<F>;
+
+type PoseidonBn254 = Poseidon256<BN254>;
+type PoseidonFp64 = Poseidon64;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
 #[test]
-fn test_verify_winter() {
+fn test_mock_verify_winter_fp64() {
     init();
 
     // Polynomial parameters
-    let trace_length = 16384;
+    let trace_length = 1024;
     let blowup_factor = 2;
     let domain_size = trace_length * blowup_factor;
 
@@ -50,13 +54,13 @@ fn test_verify_winter() {
     let folding_factor = 2;
     let num_queries = 28;
     let max_remainder_degree = 16;
-    type HashFn = Poseidon<BaseElement>;
+    type HashFn = PoseidonFp64;
 
     // Evaluate a random polynomial over the domain
     let evaluations = eval_rand_polynomial(trace_length, domain_size);
 
     // Build a FRI proof
-    let mut channel = winter::DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(
+    let mut channel = winter::DefaultProverChannel::<F64, QuadExtension<F64>, HashFn>::new(
         domain_size,
         num_queries,
     );
@@ -68,11 +72,83 @@ fn test_verify_winter() {
 
     // Extract witness data from proof
     let (layer_commitments, queries, remainder) = match folding_factor {
-        2 => winter::extract_witness::<2, HashFn>(proof, channel, positions, domain_size),
+        2 => winter::extract_witness::<2, Fp2, F64, QuadExtension<F64>, HashFn>(
+            proof,
+            channel,
+            positions,
+            domain_size,
+        ),
         _ => panic!("unsupported folding factor"),
     };
 
-    let seed = Poseidon::<BaseElement>::hash(&[]);
+    let seed = PoseidonFp64::hash(&[]);
+    let mut bytes = [0u8; 8];
+    for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
+        *v = b;
+    }
+    let fp = Fp::from_repr(Fp(u64::from_le_bytes(bytes))).unwrap();
+    let public_coin_seed = Fp2::new(fp, Fp::from(0));
+
+    let circuit = FriVerifierCircuit::<
+        Fp2,
+        PoseidonChipFp64_8_22<Fp>,
+        RandomCoin<Fp2, PoseidonChipFp64_8_22<Fp>>,
+    > {
+        layer_commitments,
+        queries,
+        remainder,
+        options: FriOptions {
+            folding_factor,
+            max_remainder_degree,
+            log_degree: domain_size.ilog2() as usize,
+        },
+        public_coin_seed,
+        _marker: PhantomData,
+    };
+
+    let prover = MockProver::run(17, &circuit, vec![vec![]]).unwrap();
+    prover.assert_satisfied();
+}
+
+#[test]
+fn test_mock_verify_winter_bn254() {
+    init();
+
+    // Polynomial parameters
+    let trace_length = 1024;
+    let blowup_factor = 2;
+    let domain_size = trace_length * blowup_factor;
+
+    // Fri parameters
+    let folding_factor = 2;
+    let num_queries = 28;
+    let max_remainder_degree = 16;
+    type HashFn = PoseidonBn254;
+
+    // Evaluate a random polynomial over the domain
+    let evaluations = eval_rand_polynomial(trace_length, domain_size);
+
+    // Build a FRI proof
+    let mut channel =
+        winter::DefaultProverChannel::<BN254, BN254, HashFn>::new(domain_size, num_queries);
+    let (proof, positions) = winter::build_fri_proof(
+        evaluations,
+        &mut channel,
+        WinterFriOptions::new(blowup_factor, folding_factor, max_remainder_degree),
+    );
+
+    // Extract witness data from proof
+    let (layer_commitments, queries, remainder) = match folding_factor {
+        2 => winter::extract_witness::<2, Fr, BN254, BN254, HashFn>(
+            proof,
+            channel,
+            positions,
+            domain_size,
+        ),
+        _ => panic!("unsupported folding factor"),
+    };
+
+    let seed = PoseidonBn254::hash(&[]);
     let mut bytes = [0u8; 32];
     for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
         *v = b;
@@ -96,7 +172,73 @@ fn test_verify_winter() {
         _marker: PhantomData,
     };
 
-    let k = 17;
+    let prover = MockProver::run(17, &circuit, vec![vec![]]).unwrap();
+    prover.assert_satisfied();
+}
+
+#[test]
+fn test_verify_winter_bn254() {
+    init();
+
+    // Polynomial parameters
+    let trace_length = 512; //16384;
+    let blowup_factor = 2;
+    let domain_size = trace_length * blowup_factor;
+
+    // Fri parameters
+    let folding_factor = 2;
+    let num_queries = 28;
+    let max_remainder_degree = 16;
+    type HashFn = PoseidonBn254;
+
+    // Evaluate a random polynomial over the domain
+    let evaluations = eval_rand_polynomial(trace_length, domain_size);
+
+    // Build a FRI proof
+    let mut channel =
+        winter::DefaultProverChannel::<BN254, BN254, HashFn>::new(domain_size, num_queries);
+    let (proof, positions) = winter::build_fri_proof(
+        evaluations,
+        &mut channel,
+        WinterFriOptions::new(blowup_factor, folding_factor, max_remainder_degree),
+    );
+
+    // Extract witness data from proof
+    let (layer_commitments, queries, remainder) = match folding_factor {
+        2 => winter::extract_witness::<2, Fr, BN254, BN254, HashFn>(
+            proof,
+            channel,
+            positions,
+            domain_size,
+        ),
+        _ => panic!("unsupported folding factor"),
+    };
+
+    let seed = HashFn::hash(&[]);
+    let mut bytes = [0u8; 32];
+    for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
+        *v = b;
+    }
+    let public_coin_seed = Fr::from_repr(bytes).unwrap();
+
+    let circuit = FriVerifierCircuit::<
+        Fr,
+        PoseidonChipBn254_8_58<Fr>,
+        RandomCoin<Fr, PoseidonChipBn254_8_58<Fr>>,
+    > {
+        layer_commitments,
+        queries,
+        remainder,
+        options: FriOptions {
+            folding_factor,
+            max_remainder_degree,
+            log_degree: domain_size.ilog2() as usize,
+        },
+        public_coin_seed,
+        _marker: PhantomData,
+    };
+
+    let k = 16;
     let params = ParamsKZG::<Bn256>::new(k);
     let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
     let pk = keygen_pk(&params, vk.clone(), &circuit).expect("keygen_pk should not fail");
@@ -136,70 +278,7 @@ fn test_verify_winter() {
 }
 
 #[test]
-fn test_mock_verify_winter() {
-    init();
-
-    // Polynomial parameters
-    let trace_length = 1024;
-    let blowup_factor = 2;
-    let domain_size = trace_length * blowup_factor;
-
-    // Fri parameters
-    let folding_factor = 2;
-    let num_queries = 28;
-    let max_remainder_degree = 16;
-    type HashFn = Poseidon<BaseElement>;
-
-    // Evaluate a random polynomial over the domain
-    let evaluations = eval_rand_polynomial(trace_length, domain_size);
-
-    // Build a FRI proof
-    let mut channel = winter::DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(
-        domain_size,
-        num_queries,
-    );
-    let (proof, positions) = winter::build_fri_proof(
-        evaluations,
-        &mut channel,
-        WinterFriOptions::new(blowup_factor, folding_factor, max_remainder_degree),
-    );
-
-    // Extract witness data from proof
-    let (layer_commitments, queries, remainder) = match folding_factor {
-        2 => winter::extract_witness::<2, HashFn>(proof, channel, positions, domain_size),
-        _ => panic!("unsupported folding factor"),
-    };
-
-    let seed = Poseidon::<BaseElement>::hash(&[]);
-    let mut bytes = [0u8; 32];
-    for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
-        *v = b;
-    }
-    let public_coin_seed = Fr::from_repr(bytes).unwrap();
-
-    let circuit = FriVerifierCircuit::<
-        Fr,
-        PoseidonChipBn254_8_58<Fr>,
-        RandomCoin<Fr, PoseidonChipBn254_8_58<Fr>>,
-    > {
-        layer_commitments,
-        queries,
-        remainder,
-        options: FriOptions {
-            folding_factor,
-            max_remainder_degree,
-            log_degree: domain_size.ilog2() as usize,
-        },
-        public_coin_seed,
-        _marker: PhantomData,
-    };
-
-    let prover = MockProver::run(17, &circuit, vec![vec![]]).unwrap();
-    prover.assert_satisfied();
-}
-
-#[test]
-fn test_poseidon_hash() {
+fn test_poseidon_hash_bn254() {
     init();
 
     #[derive(Default)]
@@ -251,7 +330,7 @@ fn test_poseidon_hash() {
                     }
 
                     // Winterfell digest
-                    let digest_winter = Poseidon::<BaseElement>::hash(&bytes);
+                    let digest_winter = PoseidonBn254::hash(&bytes);
                     let mut bytes = F::Repr::default();
                     for (v, b) in bytes.as_mut().iter_mut().zip(digest_winter.as_bytes()) {
                         *v = b;
@@ -269,7 +348,7 @@ fn test_poseidon_hash() {
                         vec![],
                         None,
                     )?;
-                    let digest = poseidon_chip.hash(&mut ctx, &config, &cells)?;
+                    let digest = poseidon_chip.hash_elements(&mut ctx, &config, &cells)?;
 
                     // Compare digests
                     digest.to_assigned()[0].value().assert_if_known(|x| {

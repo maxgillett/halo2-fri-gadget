@@ -269,6 +269,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldilocks"
+version = "0.1.0"
+dependencies = [
+ "ff",
+ "halo2curves",
+ "pasta_curves",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "group"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -285,6 +296,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "ff",
+ "goldilocks",
  "halo2_base",
  "halo2_proofs",
  "hex",
@@ -296,6 +308,7 @@ dependencies = [
  "rand_core",
  "serde",
  "uint",
+ "unroll",
  "winter-crypto",
  "winter-fri",
  "winter-math",
@@ -305,7 +318,6 @@ dependencies = [
 [[package]]
 name = "halo2_base"
 version = "0.1.0"
-source = "git+https://github.com/maxgillett/halo2-base?branch=halo2_fri#4a6c732d32e08957939a65a676079c9693dd6015"
 dependencies = [
  "ff",
  "halo2_proofs",
@@ -318,7 +330,6 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/maxgillett/halo2-ce?branch=halo2_fri#9f63d4ef2af102355a4a5e9e0eefaeb9ebed776c"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -755,6 +766,16 @@ name = "unicode-ident"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84a22b9f218b40614adcb3f4ff08b703773ad44fa9423e4e0d346d5db86e4ebc"
+
+[[package]]
+name = "unroll"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "version_check"

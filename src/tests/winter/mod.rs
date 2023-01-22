@@ -18,13 +18,14 @@ pub mod field;
 pub mod hash;
 
 /// Generate evaluations of a random polynomial over the given domain
-pub fn eval_rand_polynomial(trace_length: usize, domain_size: usize) -> Vec<BaseElement> {
+pub fn eval_rand_polynomial<B: StarkField, E: FieldElement<BaseField = B>>(
+    trace_length: usize,
+    domain_size: usize,
+) -> Vec<E> {
     // Evaluate a random polynomial on the given domain
-    let mut evaluations = (0..trace_length as u64)
-        .map(BaseElement::new)
-        .collect::<Vec<_>>();
-    evaluations.resize(domain_size, BaseElement::ZERO);
-    let twiddles = fft::get_twiddles::<BaseElement>(domain_size);
+    let mut evaluations = (0..trace_length as u64).map(E::from).collect::<Vec<_>>();
+    evaluations.resize(domain_size, E::ZERO);
+    let twiddles = fft::get_twiddles::<B>(domain_size);
     fft::evaluate_poly(&mut evaluations, &twiddles);
     evaluations
 }
@@ -47,12 +48,18 @@ pub fn build_fri_proof<
 }
 
 /// Convert FRI proof into usable witness data
-pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>>(
+pub fn extract_witness<
+    const N: usize,
+    F: FieldExt,
+    B: StarkField,
+    E: FieldElement<BaseField = B>,
+    H: ElementHasher<BaseField = B>,
+>(
     proof: FriProof,
-    channel: DefaultProverChannel<BaseElement, BaseElement, H>,
+    channel: DefaultProverChannel<B, E, H>,
     positions: Vec<usize>,
     domain_size: usize,
-) -> (LayerCommitments, Vec<Query>, Remainder) {
+) -> (LayerCommitments, Vec<Query<F>>, Remainder<F>) {
     // Read layer commitments
     let layer_commitments = channel
         .layer_commitments()
@@ -62,16 +69,14 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
 
     // Parse remainder
     let remainder = proof
-        .parse_remainder::<BaseElement>()
+        .parse_remainder::<E>()
         .unwrap()
         .iter()
         .map(|x| base_element_to_fr(*x))
         .collect::<Vec<_>>();
 
     // Parse layer queries and Merkle proofs
-    let (layer_queries, layer_merkle_proofs) = proof
-        .parse_layers::<H, BaseElement>(domain_size, N)
-        .unwrap();
+    let (layer_queries, layer_merkle_proofs) = proof.parse_layers::<H, E>(domain_size, N).unwrap();
 
     // Unbatch and reinsert queries/proofs
     let mut indices = positions.clone();
@@ -87,7 +92,7 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
             let mut proof_map = HashMap::new();
             for (index, values, proofs) in itertools::izip!(
                 &indices_deduped,
-                group_vector_elements::<BaseElement, N>(queries),
+                group_vector_elements::<E, N>(queries),
                 batch_merkle_proof.into_paths(&indices_deduped[..]).unwrap()
             ) {
                 query_map.insert(
@@ -168,6 +173,13 @@ pub fn group_vector_elements<T, const N: usize>(source: Vec<T>) -> Vec<[T; N]> {
     unsafe { Vec::from_raw_parts(p as *mut [T; N], len, cap) }
 }
 
-fn base_element_to_fr(y: BaseElement) -> Fr {
-    Fr::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
+fn base_element_to_fr<F: FieldExt, B: StarkField, E: FieldElement<BaseField = B>>(y: E) -> F {
+    // TODO: Initialize repr
+    let mut bytes = F::Repr::default();
+    let input = <[u8; 32]>::try_from(y.as_bytes()).unwrap();
+    for (v, b) in bytes.as_mut().iter_mut().zip(input.iter()) {
+        *v = *b;
+    }
+    F::from_repr(bytes).unwrap()
+    //F::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
 }

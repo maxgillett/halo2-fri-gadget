@@ -19,6 +19,8 @@ use halo2_proofs::{
 use log::debug;
 use std::marker::PhantomData;
 
+mod hash;
+mod merkle;
 #[cfg(test)]
 mod tests;
 
@@ -82,17 +84,31 @@ trait HasherChip<F: FieldExt> {
     type Digest: HasherChipDigest<F>;
 
     fn new(ctx: &mut Context<F>, main_gate: &FlexGateConfig<F>) -> Self;
-    fn hash(
+
+    fn hash_elements(
         &mut self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
         values: &[AssignedValue<F>],
     ) -> Result<Self::Digest, Error>;
+
+    fn hash_digests(
+        &mut self,
+        ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        values: &[Self::Digest],
+    ) -> Result<Self::Digest, Error> {
+        let elements = &Self::Digest::digests_to_elements(values);
+        self.hash_elements(ctx, main_chip, elements)
+    }
 }
 
 trait HasherChipDigest<F: FieldExt>: Clone {
     fn from_assigned(values: Vec<AssignedValue<F>>) -> Self;
     fn to_assigned(&self) -> Vec<AssignedValue<F>>;
+    fn digests_to_elements(digests: &[Self]) -> Vec<AssignedValue<F>> {
+        digests.iter().flat_map(|x| x.to_assigned()).collect()
+    }
 }
 
 #[derive(Clone)]
@@ -108,9 +124,32 @@ impl<F: FieldExt, const N: usize> HasherChipDigest<F> for Digest<F, N> {
 }
 
 #[derive(Clone)]
+struct PoseidonChipFp64_8_22<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 4, 3>);
+
+impl<F: FieldExt> HasherChip<F> for PoseidonChipFp64_8_22<F> {
+    type Digest = Digest<F, 4>;
+
+    fn new(ctx: &mut Context<F>, flex_gate: &FlexGateConfig<F>) -> Self {
+        Self(PoseidonChip::<F, FlexGateConfig<F>, 4, 3>::new(ctx, flex_gate, 8, 22).unwrap())
+    }
+
+    fn hash_elements(
+        &mut self,
+        ctx: &mut Context<'_, F>,
+        main_chip: &FlexGateConfig<F>,
+        values: &[AssignedValue<F>],
+    ) -> Result<Self::Digest, Error> {
+        self.0.update(values);
+        let values = self.0.squeeze(ctx, main_chip)?;
+        self.0.clear();
+        // TODO: implement Goldilocks-Poseidon chip
+        todo!()
+    }
+}
+
+#[derive(Clone)]
 struct PoseidonChipBn254_8_58<F: FieldExt>(PoseidonChip<F, FlexGateConfig<F>, 4, 3>);
 
-// TODO: Implement Goldilocks-friendly Poseidon implementation
 impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_58<F> {
     type Digest = Digest<F, 1>;
 
@@ -118,7 +157,7 @@ impl<F: FieldExt> HasherChip<F> for PoseidonChipBn254_8_58<F> {
         Self(PoseidonChip::<F, FlexGateConfig<F>, 4, 3>::new(ctx, flex_gate, 8, 58).unwrap())
     }
 
-    fn hash(
+    fn hash_elements(
         &mut self,
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
@@ -172,14 +211,14 @@ impl<F: FieldExt, H: HasherChip<F>> RandomCoinChip<F, H> for RandomCoin<F, H> {
         // Reseed
         let mut contents = self.seed.to_assigned();
         contents.append(&mut commitment.to_assigned());
-        self.seed = hasher_chip.hash(ctx, main_chip, &contents)?;
+        self.seed = hasher_chip.hash_elements(ctx, main_chip, &contents)?;
         self.counter = main_chip.mul(ctx, &Constant(F::zero()), &Existing(&self.counter))?;
 
         // Reproduce alpha
         contents = self.seed.to_assigned();
         self.counter = main_chip.add(ctx, &Constant(F::one()), &Existing(&self.counter))?;
         contents.push(self.counter.clone());
-        hasher_chip.hash(ctx, main_chip, &contents)
+        hasher_chip.hash_elements(ctx, main_chip, &contents)
     }
 }
 
@@ -195,20 +234,14 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
         hasher_chip: &mut H,
-        leaves: &[AssignedValue<F>],
-    ) -> Result<AssignedValue<F>, Error> {
+        leaves: &[H::Digest],
+    ) -> Result<H::Digest, Error> {
         let depth = leaves.len().ilog2();
         let mut nodes = leaves.to_vec();
         for _ in 0..depth {
             nodes = nodes
                 .chunks(2)
-                .map(|pair| {
-                    hasher_chip
-                        .hash(ctx, main_chip, pair)
-                        .unwrap()
-                        .to_assigned()[0]
-                        .clone()
-                })
+                .map(|pair| hasher_chip.hash_digests(ctx, main_chip, pair).unwrap())
                 .collect::<Vec<_>>();
         }
         Ok(nodes[0].clone())
@@ -224,24 +257,32 @@ impl<F: FieldExt, H: HasherChip<F>> MerkleTreeChip<F, H> {
         proof: &[H::Digest],
     ) -> Result<(), Error> {
         // Hash leaves to a single digest
-        let mut digest = hasher_chip.hash(ctx, main_chip, leaves)?;
+        let mut digest = hasher_chip.hash_elements(ctx, main_chip, leaves)?;
         for (bit, sibling) in index_bits.iter().zip(proof.iter().skip(1)) {
             let mut values = vec![];
-            let a = main_chip.select(
-                ctx,
-                &Existing(&sibling.to_assigned()[0]),
-                &Existing(&digest.to_assigned()[0]),
-                &Existing(&bit),
-            )?;
-            let b = main_chip.select(
-                ctx,
-                &Existing(&digest.to_assigned()[0]),
-                &Existing(&sibling.to_assigned()[0]),
-                &Existing(&bit),
-            )?;
-            values.push(a);
-            values.push(b);
-            digest = hasher_chip.hash(ctx, main_chip, &values)?;
+            let a = sibling
+                .to_assigned()
+                .iter()
+                .zip(digest.to_assigned())
+                .map(|(s, d)| {
+                    main_chip
+                        .select(ctx, &Existing(&s), &Existing(&d), &Existing(&bit))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+            let b = sibling
+                .to_assigned()
+                .iter()
+                .zip(digest.to_assigned())
+                .map(|(s, d)| {
+                    main_chip
+                        .select(ctx, &Existing(&d), &Existing(&s), &Existing(&bit))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+            values.extend(a);
+            values.extend(b);
+            digest = hasher_chip.hash_elements(ctx, main_chip, &values)?;
         }
 
         for (e1, e2) in root.to_assigned().iter().zip(digest.to_assigned().iter()) {
@@ -458,10 +499,8 @@ where
                 .constrain_equal(previous_eval.unwrap().cell(), remainder.cell())?;
         }
 
-        // Check that a Merkle tree of the claimed remainders hash to the final layer commitment
+        // Transpose the remainders and hash them to digests
         // NOTE: This is hardcoded for a folding factor of 2
-        let remainder_commitment =
-            self.proof.layer_commitments.last().unwrap().to_assigned()[0].clone();
         let remainder_digests = self.proof.remainders
             [..self.proof.options.max_remainder_degree / 2]
             .iter()
@@ -473,15 +512,23 @@ where
             )
             .map(|values| {
                 let digest = hasher_chip
-                    .hash(ctx, self.gate(), &[values.0, values.1])
+                    .hash_elements(ctx, self.gate(), &[values.0, values.1])
                     .unwrap();
-                digest.to_assigned()[0].clone()
+                digest
             })
             .collect::<Vec<_>>();
+
+        // Check that a Merkle tree of the claimed remainders hash to the final layer commitment
         let root =
             MerkleTreeChip::<F, H>::get_root(ctx, self.gate(), hasher_chip, &remainder_digests)?;
-        ctx.region
-            .constrain_equal(root.cell(), remainder_commitment.cell())?;
+        let remainder_commitment = self.proof.layer_commitments.last().unwrap(); //.to_assigned()[0].clone();
+        for (r, c) in root
+            .to_assigned()
+            .iter()
+            .zip(remainder_commitment.to_assigned().iter())
+        {
+            ctx.region.constrain_equal(r.cell(), c.cell())?;
+        }
 
         // Ensure that the interpolated remainder polynomial is of degree <= max_remainder_degree
         self.verify_remainder_degree(
@@ -569,7 +616,10 @@ where
         // instead here? Is it cheaper?
         let mut contents = remainder_polynomial.to_vec();
         contents.push(self.proof.layer_commitments.last().unwrap().to_assigned()[0].clone());
-        let tau = hasher_chip.hash(ctx, self.gate(), &contents)?.to_assigned()[0].clone();
+        let tau = hasher_chip
+            .hash_elements(ctx, self.gate(), &contents)?
+            .to_assigned()[0]
+            .clone();
 
         // Evaluate both polynomial representations at tau and confirm agreement
         let a = self.horner_eval(ctx, remainder_polynomial, &tau)?;
@@ -889,6 +939,9 @@ where
                     &mut hasher_chip,
                     H::Digest::from_assigned(vec![public_coin_seed]),
                 )?;
+
+                config.main_chip.finalize(&mut ctx)?;
+                config.range_chip.finalize(&mut ctx)?;
 
                 Ok(())
             },

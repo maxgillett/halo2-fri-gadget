@@ -8,9 +8,12 @@ inherits = "release"
 debug = true
 
 [dependencies]
-#goldilocks = { path = "../halo2-ce/arithmetic/goldilocks" }
-halo2_proofs = { git = "https://github.com/maxgillett/halo2-ce", branch = "halo2_fri" }
-halo2_base = { git = "https://github.com/maxgillett/halo2-base", branch = "halo2_fri" }
+goldilocks = { path = "../halo2-ce/arithmetic/goldilocks" }
+#halo2_proofs = { git = "https://github.com/maxgillett/halo2-ce", branch = "halo2_fri" }
+halo2_proofs = { path = "../halo2-ce/halo2_proofs" }
+#halo2_base = { git = "https://github.com/maxgillett/halo2-base", branch = "halo2_fri" }
+halo2_base = { path = "../halo2-base" }
+unroll = "0.1.5"
 log = "0.4.17"
 lazy_static = "1.4.0"
 rand_core = { version = "0.6", default-features = false }

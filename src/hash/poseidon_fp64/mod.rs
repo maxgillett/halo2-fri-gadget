@@ -6,6 +6,8 @@ use goldilocks::Field64;
 use std::marker::PhantomData;
 use unroll::unroll_for_loops;
 
+pub mod chip;
+
 const MDS_MATRIX_CIRC: [u64; 12] = [17, 15, 41, 16, 2, 28, 13, 13, 39, 18, 34, 20];
 const MDS_MATRIX_DIAG: [u64; 12] = [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 

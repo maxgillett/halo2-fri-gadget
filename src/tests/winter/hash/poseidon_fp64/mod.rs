@@ -5,7 +5,7 @@ use winter_crypto::{Digest, ElementHasher, Hasher};
 use winter_math::{fields::f64::BaseElement, FieldElement, StarkField};
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
-use crate::hash::poseidon64_256::Poseidon64_256;
+use crate::hash::poseidon_fp64::Poseidon64_256;
 use ff::{Field, PrimeField};
 use goldilocks::fp::{Goldilocks as Fp, MODULUS};
 
@@ -28,7 +28,7 @@ fn poseidon_hash(inputs: &[Fp]) -> ElementDigest {
     loop {
         for i in 0..Poseidon64_256::<Fp>::SPONGE_RATE {
             outputs[i] = state[i];
-            if i == 4 {
+            if i == 3 {
                 return ElementDigest::new(outputs);
             }
         }

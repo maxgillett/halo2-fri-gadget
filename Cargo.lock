@@ -291,13 +291,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2-base"
+version = "0.2.2"
+dependencies = [
+ "ff",
+ "halo2_proofs",
+ "itertools",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "poseidon",
+ "rand_chacha",
+ "rustc-hash",
+]
+
+[[package]]
 name = "halo2-fri-gadget"
 version = "0.1.0"
 dependencies = [
  "env_logger",
  "ff",
  "goldilocks",
- "halo2_base",
+ "halo2-base",
  "halo2_proofs",
  "hex",
  "itertools",
@@ -313,18 +328,6 @@ dependencies = [
  "winter-fri",
  "winter-math",
  "winter-utils",
-]
-
-[[package]]
-name = "halo2_base"
-version = "0.1.0"
-dependencies = [
- "ff",
- "halo2_proofs",
- "num-bigint",
- "num-integer",
- "num-traits",
- "poseidon",
 ]
 
 [[package]]
@@ -636,6 +639,12 @@ name = "regex-syntax"
 version = "0.6.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustix"

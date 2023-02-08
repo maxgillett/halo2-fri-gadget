@@ -50,7 +50,7 @@ pub fn build_fri_proof<
 /// Convert FRI proof into usable witness data
 pub fn extract_witness<
     const N: usize,
-    F: FieldExt,
+    F: FieldExt + Extendable<2>,
     B: StarkField,
     E: FieldElement<BaseField = B>,
     H: ElementHasher<BaseField = B>,
@@ -59,7 +59,7 @@ pub fn extract_witness<
     channel: DefaultProverChannel<B, E, H>,
     positions: Vec<usize>,
     domain_size: usize,
-) -> (LayerCommitments, Vec<Query<F>>, Remainder<F>) {
+) -> (LayerCommitments, Vec<Query<F>>, Remainder<F::Extension>) {
     // Read layer commitments
     let layer_commitments = channel
         .layer_commitments()
@@ -132,12 +132,12 @@ pub fn extract_witness<
         .enumerate()
         .map(|(i, position)| {
             let layers = (0..layer_queries.len())
-                .map(|j| FriQueryLayerWitness {
+                .map(|j| FriQueryLayerInput {
                     evaluations: layer_queries[j][i].clone(),
                     merkle_proof: layer_merkle_proofs[j][i].clone(),
                 })
                 .collect();
-            FriQueryWitness { position, layers }
+            FriQueryInput { position, layers }
         })
         .collect::<Vec<_>>();
 

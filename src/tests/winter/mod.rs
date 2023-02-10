@@ -72,7 +72,7 @@ pub fn extract_witness<
         .parse_remainder::<E>()
         .unwrap()
         .iter()
-        .map(|x| base_element_to_fr(*x))
+        .map(|x| winter_element_to_ff(*x))
         .collect::<Vec<_>>();
 
     // Parse layer queries and Merkle proofs
@@ -99,7 +99,7 @@ pub fn extract_witness<
                     index,
                     values
                         .iter()
-                        .map(|x| base_element_to_fr(*x))
+                        .map(|x| winter_element_to_ff(*x))
                         .collect::<Vec<_>>(),
                 );
                 proof_map.insert(
@@ -173,13 +173,28 @@ pub fn group_vector_elements<T, const N: usize>(source: Vec<T>) -> Vec<[T; N]> {
     unsafe { Vec::from_raw_parts(p as *mut [T; N], len, cap) }
 }
 
-fn base_element_to_fr<F: FieldExt, B: StarkField, E: FieldElement<BaseField = B>>(y: E) -> F {
-    // TODO: Initialize repr
+fn winter_element_to_ff<F: FieldExt, B: StarkField, E: FieldElement<BaseField = B>>(e: E) -> F {
     let mut bytes = F::Repr::default();
-    let input = <[u8; 32]>::try_from(y.as_bytes()).unwrap();
-    for (v, b) in bytes.as_mut().iter_mut().zip(input.iter()) {
-        *v = *b;
-    }
+    match F::NUM_BITS {
+        254 => {
+            for (a, b) in bytes
+                .as_mut()
+                .iter_mut()
+                .zip(<[u8; 32]>::try_from(e.as_bytes()).unwrap().iter())
+            {
+                *a = *b;
+            }
+        }
+        128 => {
+            for (a, b) in bytes
+                .as_mut()
+                .iter_mut()
+                .zip(<[u8; 16]>::try_from(e.as_bytes()).unwrap().iter())
+            {
+                *a = *b;
+            }
+        }
+        _ => panic!("Field element conversion not supported"),
+    };
     F::from_repr(bytes).unwrap()
-    //F::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
 }

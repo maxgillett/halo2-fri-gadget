@@ -58,13 +58,12 @@ fn test_mock_verify_winter_fp64() {
     let folding_factor = 2;
     let num_queries = 28;
     let max_remainder_degree = 16;
-    type HashFn = PoseidonFp64;
 
     // Evaluate a random polynomial over the domain
     let evaluations = eval_rand_polynomial(trace_length, domain_size);
 
     // Build a FRI proof
-    let mut channel = winter::DefaultProverChannel::<F64, QuadExtension<F64>, HashFn>::new(
+    let mut channel = winter::DefaultProverChannel::<F64, QuadExtension<F64>, PoseidonFp64>::new(
         domain_size,
         num_queries,
     );
@@ -76,7 +75,7 @@ fn test_mock_verify_winter_fp64() {
 
     // Extract witness data from proof
     let (layer_commitments, queries, remainder) = match folding_factor {
-        2 => winter::extract_witness::<2, Fp, F64, QuadExtension<F64>, HashFn>(
+        2 => winter::extract_witness::<2, Fp, F64, QuadExtension<F64>, PoseidonFp64>(
             proof,
             channel,
             positions,
@@ -90,8 +89,7 @@ fn test_mock_verify_winter_fp64() {
     for (v, b) in bytes.as_mut().iter_mut().zip(seed.as_bytes()) {
         *v = b;
     }
-    let fp = Fp::from_repr(Fp(u64::from_le_bytes(bytes))).unwrap();
-    let public_coin_seed = Fp::from(0); //Fp2::new(fp, Fp::from(0));
+    let public_coin_seed = Fp::from_repr(Fp(u64::from_le_bytes(bytes))).unwrap();
 
     let circuit = FriVerifierCircuit::<
         Fp,

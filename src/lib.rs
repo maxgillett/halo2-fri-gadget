@@ -73,7 +73,7 @@ struct FriOptions {
 // =========================================================================
 
 struct FriProofAssigned<'v, F: FieldExt + Extendable<2>, H: HasherChip<F>> {
-    pub layer_commitments: Vec<H::Digest>,
+    pub layer_commitments: Vec<H::Digest<'v>>,
     pub queries: Vec<FriQueryAssigned<'v, F, H>>,
     pub remainders: Vec<AssignedExtensionValue<'v, F>>,
     pub remainders_poly: Vec<AssignedExtensionValue<'v, F>>,
@@ -87,7 +87,7 @@ struct FriQueryAssigned<'v, F: FieldExt + Extendable<2>, H: HasherChip<F>> {
 
 struct FriQueryLayerAssigned<'v, F: FieldExt + Extendable<2>, H: HasherChip<F>> {
     pub evaluations: Vec<AssignedExtensionValue<'v, F>>,
-    pub merkle_proof: Vec<H::Digest>,
+    pub merkle_proof: Vec<H::Digest<'v>>,
 }
 
 // ASSIGNMENT INSTRUCTIONS
@@ -97,7 +97,7 @@ trait AssignInput<'v, const N: usize, F, E, H>
 where
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F>,
-    H: HasherChip<F, Digest = Digest<'v, F, N>>,
+    H: HasherChip<F, Digest<'v> = Digest<'v, F, N>>,
 {
     fn assign(
         &self,
@@ -110,7 +110,7 @@ impl<'v, const N: usize, F, E, H> AssignInput<'v, N, F, E, H> for FriQueryInput<
 where
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F, BaseField = F, Field = F::Extension>,
-    H: HasherChip<F, Digest = Digest<'v, F, N>>,
+    H: HasherChip<F, Digest<'v> = Digest<'v, F, N>>,
 {
     fn assign(
         &self,
@@ -151,22 +151,23 @@ struct VerifierChipConfig<F: FieldExt + Extendable<2>, E: ExtensionFieldChip<D, 
 
 struct VerifierChip<
     'a,
+    const N: usize,
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F>,
     H: HasherChip<F>,
-    C: RandomCoinChip<F, H>,
+    C: RandomCoinChip<'a, F, H>,
 > {
     config: VerifierChipConfig<F, E>,
     proof: FriProofAssigned<'a, F, H>,
     _marker: PhantomData<C>,
 }
 
-impl<'a, F, E, H, C> VerifierChip<'a, F, E, H, C>
+impl<'a, const N: usize, F, E, H, C> VerifierChip<'a, N, F, E, H, C>
 where
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F, BaseField = F, Field = F::Extension> + Clone,
-    H: HasherChip<F>,
-    C: RandomCoinChip<F, H>,
+    H: for<'v> HasherChip<F, Digest<'v> = Digest<'v, F, N>>,
+    C: RandomCoinChip<'a, F, H>,
 {
     fn new(
         config: VerifierChipConfig<F, E>,
@@ -183,7 +184,8 @@ where
         meta: &mut ConstraintSystem<F>,
         instance: Column<Instance>,
     ) -> VerifierChipConfig<F, E> {
-        let extension_config = ExtensionFieldConfig::configure(meta, NUM_ADVICE);
+        // TODO: These parameters should be read from file or command line input
+        let extension_config = ExtensionFieldConfig::configure(meta, NUM_ADVICE, K);
         let extension = E::construct(extension_config);
         VerifierChipConfig {
             instance,
@@ -215,19 +217,19 @@ where
     fn verify_proof(
         &self,
         ctx: &mut Context<'_, F>,
-        hasher_chip: &mut H,
+        hasher_chip: &H,
         public_coin_chip: &mut C,
     ) -> Result<(), Error> {
         let log_degree = self.proof.options.log_degree;
         let folding_factor = self.proof.options.folding_factor;
-        let layer_commitments = &self.proof.layer_commitments;
+        let layer_commitments = &self.proof.layer_commitments.clone();
 
         // Use the public coin to generate alphas from the layer commitments
         let alphas = self.draw_alphas(
             ctx,
             hasher_chip,
-            public_coin_chip,
             &self.proof.layer_commitments,
+            public_coin_chip,
         )?;
 
         // Execute the FRI verification protocol for each query round
@@ -277,7 +279,7 @@ where
                 let evaluations = vec![a, b];
 
                 // Verify that evaluations reside at the folded position in the Merkle tree
-                MerkleTreeChip::<F, H>::verify_merkle_proof(
+                MerkleTreeChip::<N, F, H>::verify_merkle_proof(
                     ctx,
                     self.gate(),
                     self.extension(),
@@ -309,6 +311,7 @@ where
 
                 // Interpolate the evaluations at the x-coordinates, and evaluate at alpha.
                 // Use this value to compare with subsequent layer evaluations
+                // Convert alpha to a field element
                 previous_eval =
                     Some(self.evaluate_polynomial(ctx, &x, &x_folded, &evaluations, &alphas[i])?);
 
@@ -372,7 +375,7 @@ where
 
         // Check that a Merkle tree of the claimed remainders hash to the final layer commitment
         let root =
-            MerkleTreeChip::<F, H>::get_root(ctx, self.gate(), hasher_chip, &remainder_digests)?;
+            MerkleTreeChip::<N, F, H>::get_root(ctx, self.gate(), hasher_chip, &remainder_digests)?;
         let remainder_commitment = self.proof.layer_commitments.last().unwrap();
         for (r, c) in root
             .to_assigned()
@@ -396,24 +399,44 @@ where
 
     /// Reconstruct the alphas used at each step of the FRI commit phase using the
     /// Merkle commitments for the layers.
-    fn draw_alphas(
-        &self,
+    fn draw_alphas<'v>(
+        &'v self,
         ctx: &mut Context<'_, F>,
-        hasher_chip: &mut H,
+        hasher_chip: &'v H,
+        commitments: &'v [H::Digest<'v>],
         public_coin_chip: &mut C,
-        commitments: &[H::Digest],
-    ) -> Result<Vec<H::Digest>, Error> {
-        let mut counter = self.gate().load_zero(ctx);
+    ) -> Result<Vec<AssignedExtensionValue<'v, F>>, Error> {
         let mut alphas = vec![];
+        let mut seed = public_coin_chip.seed();
+        let counter = self.gate().load_constant(ctx, F::one());
         for commitment in commitments {
-            let alpha = public_coin_chip.draw_alpha::<E>(
-                ctx,
-                self.gate(),
-                hasher_chip,
-                commitment,
-                &mut counter,
-            )?;
+            // Reseed
+            let new_seed = {
+                let mut contents = vec![];
+                contents.extend(seed.0.to_vec());
+                contents.append(&mut commitment.to_assigned().to_vec());
+                let new_seed = hasher_chip.hash_elements(ctx, self.gate(), &contents)?;
+                new_seed
+            };
+
+            // Compute alpha
+            let mut contents = vec![];
+            contents.extend(new_seed.0.to_vec());
+            contents.push(counter.clone());
+            let digest = hasher_chip.hash_elements(ctx, self.gate(), &contents)?;
+
+            // Convert alpha to a field element
+            let alpha = AssignedExtensionValue::construct(
+                digest
+                    .0
+                    .into_iter()
+                    .take(F::Extension::NUM_BASE_ELEMENTS)
+                    .collect::<Vec<_>>(),
+            );
             alphas.push(alpha);
+
+            // Update seed
+            seed = new_seed;
         }
         Ok(alphas)
     }
@@ -426,24 +449,14 @@ where
         x: &AssignedValue<'v, F>,
         _x_folded: &[AssignedValue<'v, F>],
         evaluations: &[AssignedExtensionValue<'v, F>],
-        alpha: &'v H::Digest,
+        alpha: &AssignedExtensionValue<'v, F>,
     ) -> Result<AssignedExtensionValue<'v, F>, Error> {
-        // Convert alpha to a field element
-        let alpha_ext = AssignedExtensionValue::construct(
-            alpha
-                .to_assigned()
-                .to_vec()
-                .into_iter()
-                .take(F::Extension::NUM_BASE_ELEMENTS)
-                .collect::<Vec<_>>(),
-        );
-
         match self.proof.options.folding_factor {
             2 => {
                 let main_chip = self.gate();
                 let extension = self.extension();
                 let x_inv = main_chip.invert(ctx, Existing(x));
-                let xomega = extension.mul_base(ctx, ExistingExt(&alpha_ext), Existing(&x_inv));
+                let xomega = extension.mul_base(ctx, ExistingExt(&alpha), Existing(&x_inv));
                 let xomega_neg = extension.negate(ctx, ExistingExt(&xomega));
                 let add =
                     extension.add(ctx, ExistingExt(&xomega_neg), ConstantExt(E::Field::one()));
@@ -469,7 +482,7 @@ where
     fn verify_remainder_degree<'v>(
         &self,
         ctx: &mut Context<'_, F>,
-        hasher_chip: &mut H,
+        hasher_chip: &H,
         remainder_evaluations: &[AssignedExtensionValue<'v, F>],
         remainder_polynomial: &[AssignedExtensionValue<'v, F>],
         max_degree: usize,
@@ -638,6 +651,7 @@ where
 // CIRCUIT
 // =========================================================================
 
+const K: usize = 17;
 const NUM_ADVICE: usize = 100;
 
 #[derive(Clone)]
@@ -646,7 +660,7 @@ struct FriVerifierCircuit<
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F>,
     H: HasherChip<F>,
-    C: RandomCoinChip<F, H>,
+    C: RandomCoinChip<'a, F, H>,
 > {
     pub layer_commitments: Vec<[u8; 32]>,
     pub queries: Vec<FriQueryInput<F>>,
@@ -661,7 +675,7 @@ where
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F>,
     H: HasherChip<F>,
-    C: RandomCoinChip<F, H>,
+    C: RandomCoinChip<'a, F, H>,
 {
     fn default() -> Self {
         Self {
@@ -679,8 +693,8 @@ impl<'a, F, E, H, C, const N: usize> Circuit<F> for FriVerifierCircuit<'a, F, E,
 where
     F: FieldExt + Extendable<2>,
     E: ExtensionFieldChip<D, F, BaseField = F, Field = F::Extension> + Clone,
-    H: HasherChip<F, Digest = Digest<'a, F, N>>,
-    C: RandomCoinChip<F, H>,
+    H: for<'v> HasherChip<F, Digest<'v> = Digest<'v, F, N>>,
+    C: RandomCoinChip<'a, F, H>,
 {
     type Config = VerifierChipConfig<F, E>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -692,7 +706,7 @@ where
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let instance = meta.instance_column();
         meta.enable_equality(instance);
-        VerifierChip::<F, E, H, C>::configure(meta, instance)
+        VerifierChip::<N, F, E, H, C>::configure(meta, instance)
     }
 
     fn synthesize(
@@ -761,7 +775,7 @@ where
                 };
 
                 // Initialize hasher chip
-                let mut hasher_chip = H::new(&mut ctx, &config.extension.gate());
+                let hasher_chip = H::new(&mut ctx, &config.extension.gate());
 
                 // Initialize public coin chip
                 let initial_seed = Digest::new(vec![config
@@ -771,8 +785,8 @@ where
                 let mut public_coin_chip = C::new(initial_seed);
 
                 // Initialize and run verifier chip
-                let verifier_chip = VerifierChip::<F, E, H, C>::new(config.clone(), fri_proof)?;
-                verifier_chip.verify_proof(&mut ctx, &mut hasher_chip, &mut public_coin_chip)?;
+                let verifier_chip = VerifierChip::<N, F, E, H, C>::new(config.clone(), fri_proof)?;
+                verifier_chip.verify_proof(&mut ctx, &hasher_chip, &mut public_coin_chip)?;
 
                 config.extension.range().finalize(&mut ctx);
 
@@ -784,28 +798,39 @@ where
     }
 }
 
-fn assign_digests<'v, const N: usize, F: FieldExt, H: HasherChip<F, Digest = Digest<'v, F, N>>>(
+fn assign_digests<
+    'v,
+    const N: usize,
+    F: FieldExt,
+    H: HasherChip<F, Digest<'v> = Digest<'v, F, N>>,
+>(
     ctx: &mut Context<'_, F>,
     main_chip: &FlexGateConfig<F>,
     values: &[[u8; 32]],
-) -> Result<Vec<H::Digest>, Error> {
-    Ok(main_chip
-        .assign_region(
-            ctx,
-            values
-                .iter()
-                .map(|digest| Witness(Value::known(from_byte_array(digest)))),
-            vec![],
-        )
-        .into_iter()
-        .map(|x| Digest::new(vec![x]))
+) -> Result<Vec<H::Digest<'v>>, Error> {
+    Ok(values
+        .iter()
+        .map(|value| {
+            let elements: [F; N] = byte_to_field_array(value);
+            let assigned_elements = main_chip.assign_region(
+                ctx,
+                elements.into_iter().map(|e| Witness(Value::known(e))),
+                vec![],
+            );
+            Digest::new(assigned_elements)
+        })
         .collect::<Vec<_>>())
 }
 
-fn from_byte_array<F: FieldExt>(input: &[u8; 32]) -> F {
-    let mut bytes = F::Repr::default();
-    for (v, b) in bytes.as_mut().iter_mut().zip(input.iter()) {
-        *v = *b;
+fn byte_to_field_array<const N: usize, F: FieldExt>(input: &[u8; 32]) -> [F; N] {
+    let mut elements = vec![];
+    let mut repr = [F::Repr::default(); N];
+    for (r, input_chunk) in repr.iter_mut().zip(input.chunks(N)) {
+        for (a, b) in r.as_mut().iter_mut().zip(input_chunk.iter()) {
+            *a = *b;
+        }
+        let e = F::from_repr(*r).unwrap();
+        elements.push(e);
     }
-    F::from_repr(bytes).unwrap()
+    elements.try_into().unwrap()
 }

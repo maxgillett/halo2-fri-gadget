@@ -121,7 +121,7 @@ impl ElementDigest {
             .collect::<Vec<_>>();
 
         let p = res.as_ptr();
-        let len = res.len() * DIGEST_SIZE;
+        let len = res.len(); // * DIGEST_SIZE;
         unsafe { slice::from_raw_parts(p as *const Fp, len) }
     }
 }

@@ -1,14 +1,13 @@
 use super::{
     AssignedExtensionValue, ExtensionFieldChip, ExtensionFieldConfig, QuantumExtensionCell,
 };
-use goldilocks::{Extendable, FieldExtension};
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions, RangeInstructions},
     utils::ScalarField,
     AssignedValue, Context,
     QuantumCell::{self, Constant, Existing, Witness},
 };
-use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::arithmetic::{Extendable, FieldExt, FieldExtension};
 use halo2_proofs::circuit::Value;
 use std::marker::PhantomData;
 
@@ -192,8 +191,10 @@ where
     ) -> AssignedExtensionValue<'v, F> {
         let a_coeffs = a.coeffs();
         let b_coeffs = b.coeffs();
-        assert_eq!(a_coeffs.len(), b_coeffs.len());
-        // (a_0 + a_1 * u) * (b_0 + b_1 * u) = (a_0 b_0 - a_1 b_1) + (a_0 b_1 + a_1 b_0) * u
+
+        // c0 = a0 * b0 + W * a1 * b1
+        // c1 = a0 * b1 + a1 * b0
+
         let mut ab_coeffs = Vec::with_capacity(a_coeffs.len() * b_coeffs.len());
         for i in 0..a_coeffs.len() {
             for j in 0..b_coeffs.len() {
@@ -205,22 +206,26 @@ where
                 ab_coeffs.push(coeff);
             }
         }
-        let a0b0_minus_a1b1 = self.config.range.gate().sub(
-            ctx,
-            Existing(&ab_coeffs[0]),
-            Existing(&ab_coeffs[b_coeffs.len() + 1]),
-        );
-        let a0b1_plus_a1b0 = self.config.range.gate().add(
-            ctx,
-            Existing(&ab_coeffs[1]),
-            Existing(&ab_coeffs[b_coeffs.len()]),
-        );
 
-        let mut out_coeffs = Vec::with_capacity(a_coeffs.len());
-        out_coeffs.push(a0b0_minus_a1b1);
-        out_coeffs.push(a0b1_plus_a1b0);
+        let wa1b1 =
+            self.config
+                .range
+                .gate()
+                .mul(ctx, Constant(F::from(7)), Existing(&ab_coeffs[3]));
 
-        AssignedExtensionValue::construct(out_coeffs)
+        let c0 = self
+            .config
+            .range
+            .gate()
+            .add(ctx, Existing(&ab_coeffs[0]), Existing(&wa1b1));
+
+        let c1 =
+            self.config
+                .range
+                .gate()
+                .add(ctx, Existing(&ab_coeffs[1]), Existing(&ab_coeffs[2]));
+
+        AssignedExtensionValue::construct(vec![c0, c1])
     }
 
     // a*c + c

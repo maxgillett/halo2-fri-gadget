@@ -4,7 +4,7 @@ use itertools::Itertools;
 use std::collections::HashMap;
 
 use field::bn254::BaseElement;
-use halo2_proofs::halo2curves::bn256::Fr;
+use halo2_proofs::curves::bn256::Fr;
 
 use winter_crypto::{Digest, ElementHasher};
 use winter_fri::{FriOptions as WinterFriOptions, FriProof, FriProver};
@@ -50,7 +50,8 @@ pub fn build_fri_proof<
 /// Convert FRI proof into usable witness data
 pub fn extract_witness<
     const N: usize,
-    F: FieldExt + Extendable<2>,
+    const D: usize,
+    F: FieldExt + Extendable<D>,
     B: StarkField,
     E: FieldElement<BaseField = B>,
     H: ElementHasher<BaseField = B>,
@@ -59,7 +60,7 @@ pub fn extract_witness<
     channel: DefaultProverChannel<B, E, H>,
     positions: Vec<usize>,
     domain_size: usize,
-) -> (LayerCommitments, Vec<Query<F>>, Remainder<F::Extension>) {
+) -> (LayerCommitments, Vec<Query<D, F>>, Remainder<F::Extension>) {
     // Read layer commitments
     let layer_commitments = channel
         .layer_commitments()

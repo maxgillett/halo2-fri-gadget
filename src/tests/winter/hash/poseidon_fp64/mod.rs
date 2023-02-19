@@ -24,16 +24,8 @@ fn poseidon_hash(inputs: &[Fp]) -> ElementDigest {
     }
 
     // Squeeze until we have the desired number of outputs.
-    let mut outputs = [Fp::zero(); 4];
-    loop {
-        for i in 0..Poseidon64_256::<Fp>::SPONGE_RATE {
-            outputs[i] = state[i];
-            if i == 3 {
-                return ElementDigest::new(outputs);
-            }
-        }
-        state = Poseidon64_256::permute(state);
-    }
+    state = Poseidon64_256::permute(state);
+    ElementDigest::new(state[..4].try_into().unwrap())
 }
 
 impl Hasher for Poseidon {
@@ -121,7 +113,7 @@ impl ElementDigest {
             .collect::<Vec<_>>();
 
         let p = res.as_ptr();
-        let len = res.len(); // * DIGEST_SIZE;
+        let len = res.len();
         unsafe { slice::from_raw_parts(p as *const Fp, len) }
     }
 }

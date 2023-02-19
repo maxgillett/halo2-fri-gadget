@@ -2,7 +2,7 @@
 //! https://eprint.iacr.org/2019/458.pdf
 //! Credit: This code has been modified from the Plonky2 implementation.
 
-use goldilocks::Field64;
+use halo2_proofs::arithmetic::Field64;
 use std::marker::PhantomData;
 use unroll::unroll_for_loops;
 

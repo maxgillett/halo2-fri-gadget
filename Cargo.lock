@@ -180,6 +180,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "curves"
+version = "0.2.1"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
+dependencies = [
+ "ff",
+ "group",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "static_assertions",
+ "subtle",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -271,9 +288,10 @@ dependencies = [
 [[package]]
 name = "goldilocks"
 version = "0.1.0"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
 dependencies = [
+ "curves",
  "ff",
- "halo2curves",
  "pasta_curves",
  "rand_core",
  "subtle",
@@ -293,6 +311,7 @@ dependencies = [
 [[package]]
 name = "halo2-base"
 version = "0.2.2"
+source = "git+https://github.com/maxgillett/halo2-lib?branch=feat/invert#a4fe67618a94ad5ffb4da7b42a8a5e7aabda6696"
 dependencies = [
  "ff",
  "halo2_proofs",
@@ -300,15 +319,15 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "poseidon",
  "rand_chacha",
  "rustc-hash",
 ]
 
 [[package]]
 name = "halo2-fri-gadget"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "curves",
  "env_logger",
  "ff",
  "goldilocks",
@@ -318,6 +337,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "pasta_curves",
  "poseidon",
  "rand",
  "rand_core",
@@ -333,31 +353,15 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
 dependencies = [
  "blake2b_simd",
+ "curves",
  "ff",
  "group",
- "halo2curves",
  "rand_core",
  "rayon",
  "tracing",
-]
-
-[[package]]
-name = "halo2curves"
-version = "0.2.1"
-source = "git+https://github.com/privacy-scaling-explorations/halo2curves?tag=0.3.0#83c72d49762343ffc9576ca11a2aa615efe1029b"
-dependencies = [
- "ff",
- "group",
- "lazy_static",
- "num-bigint",
- "num-traits",
- "pasta_curves",
- "rand",
- "rand_core",
- "static_assertions",
- "subtle",
 ]
 
 [[package]]
@@ -513,8 +517,7 @@ checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
 [[package]]
 name = "pasta_curves"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc65faf8e7313b4b1fbaa9f7ca917a0eed499a9663be71477f87993604341d8"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -534,10 +537,10 @@ checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 [[package]]
 name = "poseidon"
 version = "0.2.0"
-source = "git+https://github.com/maxgillett/poseidon?branch=halo2_fri#a196a7cdf57d87d48e47ac6584d5501cf0c88579"
+source = "git+https://github.com/maxgillett/poseidon?branch=feat/goldilocks#73b5bdc76fe3f4b37880cfa7d4b24d74a062dd79"
 dependencies = [
+ "curves",
  "group",
- "halo2curves",
  "subtle",
 ]
 
@@ -889,7 +892,7 @@ checksum = "f40009d85759725a34da6d89a94e63d7bdc50a862acf0dbc7c8e488f1edcb6f5"
 [[package]]
 name = "winter-crypto"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
 dependencies = [
  "blake3",
  "sha3",
@@ -900,7 +903,7 @@ dependencies = [
 [[package]]
 name = "winter-fri"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
 dependencies = [
  "winter-crypto",
  "winter-math",
@@ -910,7 +913,7 @@ dependencies = [
 [[package]]
 name = "winter-math"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
 dependencies = [
  "winter-utils",
 ]
@@ -918,7 +921,7 @@ dependencies = [
 [[package]]
 name = "winter-utils"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
 
 [[package]]
 name = "wyz"

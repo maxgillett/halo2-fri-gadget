@@ -1,6 +1,5 @@
-use crate::fields::{AssignedExtensionValue, ExtensionFieldChip};
+use crate::fields::AssignedExtensionValue;
 use crate::hash::{Digest, HasherChip, HasherChipDigest};
-use crate::D;
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, GateInstructions},
     AssignedValue, Context,
@@ -47,10 +46,9 @@ where
         Ok(nodes[0].clone())
     }
 
-    pub fn verify_merkle_proof<'v, E: ExtensionFieldChip<D, F>>(
+    pub fn verify_merkle_proof<'v>(
         ctx: &mut Context<'_, F>,
         main_chip: &FlexGateConfig<F>,
-        extension_chip: &E,
         hasher_chip: &H,
         root: &H::Digest<'v>,
         index_bits: &[AssignedValue<F>],

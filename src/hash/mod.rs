@@ -1,7 +1,5 @@
 use core::slice;
-use halo2_base::{
-    gates::flex_gate::FlexGateConfig, poseidon::PoseidonChip, AssignedValue, Context,
-};
+use halo2_base::{gates::flex_gate::FlexGateConfig, AssignedValue, Context};
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::plonk::*;
 

@@ -1,4 +1,3 @@
-use goldilocks::{Extendable, FieldExtension};
 use halo2_base::{
     gates::{
         flex_gate::FlexGateConfig,
@@ -10,8 +9,10 @@ use halo2_base::{
 };
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::{circuit::Value, plonk::*};
+use pasta_curves::arithmetic::{Extendable, FieldExtension};
 use std::fmt::Debug;
 
+pub mod fp;
 pub mod fp2;
 
 pub enum QuantumExtensionCell<'a, 'b: 'a, const D: usize, F: FieldExt + Extendable<D>> {
@@ -72,7 +73,7 @@ impl<F: FieldExt> ExtensionFieldConfig<F> {
     pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, k: usize) -> Self {
         let range = RangeConfig::configure(
             meta,
-            RangeStrategy::PlonkPlus,
+            RangeStrategy::Vertical, //PlonkPlus,
             &[num_advice],
             &[1],
             1,

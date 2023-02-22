@@ -3,13 +3,9 @@ use core::mem;
 use itertools::Itertools;
 use std::collections::HashMap;
 
-use field::bn254::BaseElement;
-use halo2_proofs::halo2curves::bn256::Fr;
-
 use winter_crypto::{Digest, ElementHasher};
 use winter_fri::{FriOptions as WinterFriOptions, FriProof, FriProver};
 use winter_math::{fft, FieldElement, StarkField};
-use winter_utils::AsBytes;
 
 pub mod channel;
 pub use channel::DefaultProverChannel;
@@ -18,13 +14,14 @@ pub mod field;
 pub mod hash;
 
 /// Generate evaluations of a random polynomial over the given domain
-pub fn eval_rand_polynomial(trace_length: usize, domain_size: usize) -> Vec<BaseElement> {
+pub fn eval_rand_polynomial<B: StarkField, E: FieldElement<BaseField = B>>(
+    trace_length: usize,
+    domain_size: usize,
+) -> Vec<E> {
     // Evaluate a random polynomial on the given domain
-    let mut evaluations = (0..trace_length as u64)
-        .map(BaseElement::new)
-        .collect::<Vec<_>>();
-    evaluations.resize(domain_size, BaseElement::ZERO);
-    let twiddles = fft::get_twiddles::<BaseElement>(domain_size);
+    let mut evaluations = (0..trace_length as u64).map(E::from).collect::<Vec<_>>();
+    evaluations.resize(domain_size, E::ZERO);
+    let twiddles = fft::get_twiddles::<B>(domain_size);
     fft::evaluate_poly(&mut evaluations, &twiddles);
     evaluations
 }
@@ -47,12 +44,19 @@ pub fn build_fri_proof<
 }
 
 /// Convert FRI proof into usable witness data
-pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>>(
+pub fn extract_witness<
+    const N: usize,
+    const D: usize,
+    F: FieldExt + Extendable<D>,
+    B: StarkField,
+    E: FieldElement<BaseField = B>,
+    H: ElementHasher<BaseField = B>,
+>(
     proof: FriProof,
-    channel: DefaultProverChannel<BaseElement, BaseElement, H>,
+    channel: DefaultProverChannel<B, E, H>,
     positions: Vec<usize>,
     domain_size: usize,
-) -> (LayerCommitments, Vec<Query>, Remainder) {
+) -> (LayerCommitments, Vec<Query<D, F>>, Remainder<F::Extension>) {
     // Read layer commitments
     let layer_commitments = channel
         .layer_commitments()
@@ -62,16 +66,14 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
 
     // Parse remainder
     let remainder = proof
-        .parse_remainder::<BaseElement>()
+        .parse_remainder::<E>()
         .unwrap()
         .iter()
-        .map(|x| base_element_to_fr(*x))
+        .map(|x| winter_element_to_ff(*x))
         .collect::<Vec<_>>();
 
     // Parse layer queries and Merkle proofs
-    let (layer_queries, layer_merkle_proofs) = proof
-        .parse_layers::<H, BaseElement>(domain_size, N)
-        .unwrap();
+    let (layer_queries, layer_merkle_proofs) = proof.parse_layers::<H, E>(domain_size, N).unwrap();
 
     // Unbatch and reinsert queries/proofs
     let mut indices = positions.clone();
@@ -87,14 +89,14 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
             let mut proof_map = HashMap::new();
             for (index, values, proofs) in itertools::izip!(
                 &indices_deduped,
-                group_vector_elements::<BaseElement, N>(queries),
+                group_vector_elements::<E, N>(queries),
                 batch_merkle_proof.into_paths(&indices_deduped[..]).unwrap()
             ) {
                 query_map.insert(
                     index,
                     values
                         .iter()
-                        .map(|x| base_element_to_fr(*x))
+                        .map(|x| winter_element_to_ff(*x))
                         .collect::<Vec<_>>(),
                 );
                 proof_map.insert(
@@ -127,12 +129,12 @@ pub fn extract_witness<const N: usize, H: ElementHasher<BaseField = BaseElement>
         .enumerate()
         .map(|(i, position)| {
             let layers = (0..layer_queries.len())
-                .map(|j| FriQueryLayerWitness {
+                .map(|j| FriQueryLayerInput {
                     evaluations: layer_queries[j][i].clone(),
                     merkle_proof: layer_merkle_proofs[j][i].clone(),
                 })
                 .collect();
-            FriQueryWitness { position, layers }
+            FriQueryInput { position, layers }
         })
         .collect::<Vec<_>>();
 
@@ -168,6 +170,28 @@ pub fn group_vector_elements<T, const N: usize>(source: Vec<T>) -> Vec<[T; N]> {
     unsafe { Vec::from_raw_parts(p as *mut [T; N], len, cap) }
 }
 
-fn base_element_to_fr(y: BaseElement) -> Fr {
-    Fr::from_repr(<[u8; 32]>::try_from(y.as_bytes()).unwrap()).unwrap()
+fn winter_element_to_ff<F: FieldExt, B: StarkField, E: FieldElement<BaseField = B>>(e: E) -> F {
+    let mut bytes = F::Repr::default();
+    match F::NUM_BITS {
+        254 => {
+            for (a, b) in bytes
+                .as_mut()
+                .iter_mut()
+                .zip(<[u8; 32]>::try_from(e.as_bytes()).unwrap().iter())
+            {
+                *a = *b;
+            }
+        }
+        128 => {
+            for (a, b) in bytes
+                .as_mut()
+                .iter_mut()
+                .zip(<[u8; 16]>::try_from(e.as_bytes()).unwrap().iter())
+            {
+                *a = *b;
+            }
+        }
+        _ => panic!("Field element conversion not supported"),
+    };
+    F::from_repr(bytes).unwrap()
 }

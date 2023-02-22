@@ -7,7 +7,7 @@ use winter_math::{FieldElement, StarkField};
 use winter_utils::{ByteReader, Deserializable, DeserializationError, Serializable};
 
 use ff::PrimeField;
-use halo2_proofs::halo2curves::bn256::Fr;
+use halo2_proofs::curves::bn256::Fr;
 use poseidon::Poseidon as PoseidonHasher;
 
 // POSEIDON HASHER SINGLETON

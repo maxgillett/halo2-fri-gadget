@@ -9,15 +9,17 @@ The verifier has runtime that is logarithmic in the size of the evaluation domai
 
 ## Circuit usage
 
-To use the circuit you'll need to implement the `HasherChip<F: FieldExt>` and `RandomCoinChip<F: FieldExt, H: HasherChip<F>>` traits for a specific hasher and random coin.
+The circuit is generic over the choice of field, hash function, random coin, and extension field. Default chips are provided for the Poseidon hash function and quadratic extension field.
 
-An example instantiation is shown below:
+An example instantiation for the Golidlocks field is shown below:
 
 ```rust
 let circuit = FriVerifierCircuit::<
-    Fr,
-    PoseidonChipBn254_8_58<Fr>,
-    RandomCoin<Fr, PoseidonChipBn254_8_58<Fr>>,
+    2,                         // Extension field degree
+    Fp,                        // Base field
+    Fp2Chip<Fp>,               // Extension field chip
+    PoseidonChipFp64_8_22<Fp>, // Hash function
+    RandomCoin<Fp, PoseidonChipFp64_8_22<Fp>>,
 > {
     layer_commitments,
     queries,
@@ -40,7 +42,7 @@ The layer commitments, queries, and remainder are provided as witnesses to the c
 To check that a representative circuit is satisfied, you can run the following test.
 This will prove the verification of a FRI proof generated over the BN254 scalar field:
 
-`cargo test test_mock_verify_winter --profile=release-with-debug`
+`cargo test test_mock_verify_winter_bn254 --profile=release-with-debug`
 
 ### Winterfell FRI support
 
@@ -48,10 +50,7 @@ The library supports parsing of Winterfell FRI proofs, helpful for testing the c
 To generate a FRI proof, you can call the following:
 
 ```rust
-let mut channel = winter::DefaultProverChannel::<BaseElement, BaseElement, HashFn>::new(
-    domain_size,
-    num_queries,
-);
+let mut channel = winter::DefaultProverChannel::<B, E, H>::new(domain_size, num_queries);
 let (proof, positions) = winter::build_fri_proof(
     evaluations,
     &mut channel,
@@ -61,11 +60,17 @@ let (proof, positions) = winter::build_fri_proof(
 
 To extract the layer commitments, queries, and remainder from a Winterfell FRI proof, you can call the following:
 ```rust
-let (layer_commitments, queries, remainder) = winter::extract_witness::<2, HashFn>(proof, channel, positions, domain_size)
+let (layer_commitments, queries, remainder) = winter::extract_witness::<
+    2, // Folding factor
+    D, // Extension field degree
+    F, // Base field (Halo2)
+    B, // Base field (Winterfell)
+    E, // Extension field (Winterfell)
+    H, // Hash function (Winterfell)
+>(proof, channel, positions, domain_size),
 ```
 
 ## Roadmap
 - **Merkle caps**: Instead of authenticating Merkle proofs for queried evaluations up to the root of a layer commitment, authentication can be stopped prematurely, and the derived hash can be compared with one in a *set* of roots that are provided for each layer at a greater depth in the tree -- the Merkle "caps." This optimization is present in the Plonky2 FRI implementation.
 - **Larger folding factors**: The current chip is implemented only for a folding factor of 2. Usage of larger folding factors may reduce the total proving cost.
-- **Goldilocks field extension**: Performance will benefit greatly from verifying FRI proofs constructed over the Goldilocks field. This will require implementing the Poseidon (or other) hash function that can support this field.
 - **Benchmarks**: Proving time should be compared for various fields, folding factors, remainder sizes, and domain sizes.

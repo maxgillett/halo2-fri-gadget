@@ -91,6 +91,7 @@ where
     }
 
     fn draw_fri_alpha(&mut self) -> E {
-        self.public_coin.draw().expect("failed to draw FRI alpha")
+        let a = self.public_coin.draw().expect("failed to draw FRI alpha");
+        a
     }
 }

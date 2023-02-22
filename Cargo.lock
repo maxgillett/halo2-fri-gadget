@@ -180,6 +180,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "curves"
+version = "0.2.1"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
+dependencies = [
+ "ff",
+ "group",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pasta_curves",
+ "rand",
+ "rand_core",
+ "static_assertions",
+ "subtle",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,6 +286,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldilocks"
+version = "0.1.0"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
+dependencies = [
+ "curves",
+ "ff",
+ "pasta_curves",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "group"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -280,22 +309,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "halo2-fri-gadget"
-version = "0.1.0"
+name = "halo2-base"
+version = "0.2.2"
+source = "git+https://github.com/maxgillett/halo2-lib?branch=feat/invert#a4fe67618a94ad5ffb4da7b42a8a5e7aabda6696"
 dependencies = [
+ "ff",
+ "halo2_proofs",
+ "itertools",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand_chacha",
+ "rustc-hash",
+]
+
+[[package]]
+name = "halo2-fri-gadget"
+version = "0.2.0"
+dependencies = [
+ "curves",
  "env_logger",
  "ff",
- "halo2_base",
+ "goldilocks",
+ "halo2-base",
  "halo2_proofs",
  "hex",
  "itertools",
  "lazy_static",
  "log",
+ "pasta_curves",
  "poseidon",
  "rand",
  "rand_core",
  "serde",
  "uint",
+ "unroll",
  "winter-crypto",
  "winter-fri",
  "winter-math",
@@ -303,47 +351,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "halo2_base"
-version = "0.1.0"
-source = "git+https://github.com/maxgillett/halo2-base?branch=halo2_fri#4a6c732d32e08957939a65a676079c9693dd6015"
-dependencies = [
- "ff",
- "halo2_proofs",
- "num-bigint",
- "num-integer",
- "num-traits",
- "poseidon",
-]
-
-[[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/maxgillett/halo2-ce?branch=halo2_fri#9f63d4ef2af102355a4a5e9e0eefaeb9ebed776c"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
 dependencies = [
  "blake2b_simd",
+ "curves",
  "ff",
  "group",
- "halo2curves",
  "rand_core",
  "rayon",
  "tracing",
-]
-
-[[package]]
-name = "halo2curves"
-version = "0.2.1"
-source = "git+https://github.com/privacy-scaling-explorations/halo2curves?tag=0.3.0#83c72d49762343ffc9576ca11a2aa615efe1029b"
-dependencies = [
- "ff",
- "group",
- "lazy_static",
- "num-bigint",
- "num-traits",
- "pasta_curves",
- "rand",
- "rand_core",
- "static_assertions",
- "subtle",
 ]
 
 [[package]]
@@ -499,8 +517,7 @@ checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
 [[package]]
 name = "pasta_curves"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc65faf8e7313b4b1fbaa9f7ca917a0eed499a9663be71477f87993604341d8"
+source = "git+https://github.com/maxgillett/halo2-ce?branch=feat/goldilocks#f08d5eb47e25cb39cf335fb7bedae4054ccd258e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -520,10 +537,10 @@ checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 [[package]]
 name = "poseidon"
 version = "0.2.0"
-source = "git+https://github.com/maxgillett/poseidon?branch=halo2_fri#a196a7cdf57d87d48e47ac6584d5501cf0c88579"
+source = "git+https://github.com/maxgillett/poseidon?branch=feat/goldilocks#73b5bdc76fe3f4b37880cfa7d4b24d74a062dd79"
 dependencies = [
+ "curves",
  "group",
- "halo2curves",
  "subtle",
 ]
 
@@ -625,6 +642,12 @@ name = "regex-syntax"
 version = "0.6.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
+
+[[package]]
+name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustix"
@@ -757,6 +780,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84a22b9f218b40614adcb3f4ff08b703773ad44fa9423e4e0d346d5db86e4ebc"
 
 [[package]]
+name = "unroll"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ad948c1cb799b1a70f836077721a92a35ac177d4daddf4c20a633786d4cf618"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -859,7 +892,7 @@ checksum = "f40009d85759725a34da6d89a94e63d7bdc50a862acf0dbc7c8e488f1edcb6f5"
 [[package]]
 name = "winter-crypto"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "blake3",
  "sha3",
@@ -870,7 +903,7 @@ dependencies = [
 [[package]]
 name = "winter-fri"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "winter-crypto",
  "winter-math",
@@ -880,7 +913,7 @@ dependencies = [
 [[package]]
 name = "winter-math"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "winter-utils",
 ]
@@ -888,7 +921,7 @@ dependencies = [
 [[package]]
 name = "winter-utils"
 version = "0.4.2"
-source = "git+https://github.com/facebook/winterfell.git#21173bdf3e552ca7662c7aa2d34515b084ae21b0"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 
 [[package]]
 name = "wyz"

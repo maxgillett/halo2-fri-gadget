@@ -3,13 +3,9 @@ use core::mem;
 use itertools::Itertools;
 use std::collections::HashMap;
 
-use field::bn254::BaseElement;
-use halo2_proofs::curves::bn256::Fr;
-
 use winter_crypto::{Digest, ElementHasher};
 use winter_fri::{FriOptions as WinterFriOptions, FriProof, FriProver};
 use winter_math::{fft, FieldElement, StarkField};
-use winter_utils::AsBytes;
 
 pub mod channel;
 pub use channel::DefaultProverChannel;

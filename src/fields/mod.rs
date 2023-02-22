@@ -73,7 +73,7 @@ impl<F: FieldExt> ExtensionFieldConfig<F> {
     pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, k: usize) -> Self {
         let range = RangeConfig::configure(
             meta,
-            RangeStrategy::Vertical, //PlonkPlus,
+            RangeStrategy::PlonkPlus,
             &[num_advice],
             &[1],
             1,

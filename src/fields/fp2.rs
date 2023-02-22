@@ -50,7 +50,7 @@ where
         assert_eq!(coeffs.len(), 2);
         let mut assigned_coeffs = Vec::with_capacity(2);
         for a in coeffs {
-            let assigned_coeff = self.config.range.gate().load_witness(ctx, Value::known(a));
+            let assigned_coeff = self.gate().load_witness(ctx, Value::known(a));
             assigned_coeffs.push(assigned_coeff);
         }
         AssignedExtensionValue::construct(assigned_coeffs)
@@ -64,7 +64,7 @@ where
         let coeffs = c.to_base_elements();
         let mut assigned_coeffs = Vec::with_capacity(2);
         for a in &coeffs {
-            let assigned_coeff = self.config.range.gate().load_constant(ctx, *a);
+            let assigned_coeff = self.gate().load_constant(ctx, *a);
             assigned_coeffs.push(assigned_coeff);
         }
         AssignedExtensionValue::construct(assigned_coeffs)
@@ -92,7 +92,7 @@ where
         assert_eq!(a_coeffs.len(), b_coeffs.len());
         let mut out_coeffs = Vec::with_capacity(a_coeffs.len());
         for (a, b) in a_coeffs.iter().cloned().zip(b_coeffs.iter().cloned()) {
-            let coeff = self.config.range.gate().add(ctx, a, b);
+            let coeff = self.gate().add(ctx, a, b);
             out_coeffs.push(coeff);
         }
         AssignedExtensionValue::construct(out_coeffs)
@@ -109,7 +109,7 @@ where
         assert_eq!(a_coeffs.len(), b_coeffs.len());
         let mut out_coeffs = Vec::with_capacity(a_coeffs.len());
         for (a, b) in a_coeffs.iter().cloned().zip(b_coeffs.iter().cloned()) {
-            let coeff = self.config.range.gate().sub(ctx, a, b);
+            let coeff = self.gate().sub(ctx, a, b);
             out_coeffs.push(coeff);
         }
         AssignedExtensionValue::construct(out_coeffs)
@@ -124,7 +124,7 @@ where
         assert_eq!(a.coeffs.len(), 2);
         let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         out_coeffs.push(a.coeffs[0].clone());
-        let coeff = self.config.range.gate().add(ctx, Existing(&a.coeffs[1]), b);
+        let coeff = self.gate().add(ctx, Existing(&a.coeffs[1]), b);
         out_coeffs.push(coeff);
         AssignedExtensionValue::construct(out_coeffs)
     }
@@ -138,7 +138,7 @@ where
         assert_eq!(a.coeffs.len(), 2);
         let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         out_coeffs.push(a.coeffs[0].clone());
-        let coeff = self.config.range.gate().sub(ctx, Existing(&a.coeffs[1]), b);
+        let coeff = self.gate().sub(ctx, Existing(&a.coeffs[1]), b);
         out_coeffs.push(coeff);
         AssignedExtensionValue::construct(out_coeffs)
     }
@@ -151,11 +151,7 @@ where
         let a_coeffs = a.coeffs();
         let mut out_coeffs = Vec::with_capacity(a_coeffs.len());
         for a_coeff in a_coeffs {
-            let out_coeff = self
-                .config
-                .range
-                .gate()
-                .mul(ctx, a_coeff, Constant(-F::one())); // negate
+            let out_coeff = self.gate().mul(ctx, a_coeff, Constant(-F::one())); // negate
             out_coeffs.push(out_coeff);
         }
         AssignedExtensionValue::construct(out_coeffs)
@@ -172,11 +168,7 @@ where
 
         let mut out_coeffs = Vec::with_capacity(2);
         for a in a_coeffs {
-            let coeff = self
-                .config
-                .range
-                .gate()
-                .mul(ctx, a, Witness(b.value().map(|x| *x)));
+            let coeff = self.gate().mul(ctx, a, Witness(b.value().map(|x| *x)));
             out_coeffs.push(coeff);
         }
         AssignedExtensionValue::construct(out_coeffs)
@@ -198,32 +190,24 @@ where
         let mut ab_coeffs = Vec::with_capacity(a_coeffs.len() * b_coeffs.len());
         for i in 0..a_coeffs.len() {
             for j in 0..b_coeffs.len() {
-                let coeff =
-                    self.config
-                        .range
-                        .gate()
-                        .mul(ctx, a_coeffs[i].clone(), b_coeffs[j].clone());
+                let coeff = self
+                    .gate()
+                    .mul(ctx, a_coeffs[i].clone(), b_coeffs[j].clone());
                 ab_coeffs.push(coeff);
             }
         }
 
-        let wa1b1 =
-            self.config
-                .range
-                .gate()
-                .mul(ctx, Constant(F::from(7)), Existing(&ab_coeffs[3]));
+        let wa1b1 = self
+            .gate()
+            .mul(ctx, Constant(F::from(7)), Existing(&ab_coeffs[3]));
 
         let c0 = self
-            .config
-            .range
             .gate()
             .add(ctx, Existing(&ab_coeffs[0]), Existing(&wa1b1));
 
-        let c1 =
-            self.config
-                .range
-                .gate()
-                .add(ctx, Existing(&ab_coeffs[1]), Existing(&ab_coeffs[2]));
+        let c1 = self
+            .gate()
+            .add(ctx, Existing(&ab_coeffs[1]), Existing(&ab_coeffs[2]));
 
         AssignedExtensionValue::construct(vec![c0, c1])
     }
@@ -259,13 +243,9 @@ where
     ) -> AssignedValue<'v, F> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
-            let coeff = self.config.range.gate().is_zero(ctx, a_coeff);
+            let coeff = self.gate().is_zero(ctx, a_coeff);
             if let Some(p) = prev {
-                let new = self
-                    .config
-                    .range
-                    .gate()
-                    .and(ctx, Existing(&coeff), Existing(&p));
+                let new = self.gate().and(ctx, Existing(&coeff), Existing(&p));
                 prev = Some(new);
             } else {
                 prev = Some(coeff);
@@ -281,9 +261,7 @@ where
         b: &AssignedExtensionValue<'v, F>,
     ) {
         for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.iter()) {
-            self.config
-                .range
-                .gate()
+            self.gate()
                 .assert_equal(ctx, Existing(a_coeff), Existing(b_coeff))
         }
     }
@@ -299,7 +277,7 @@ where
             .coeffs()
             .into_iter()
             .zip(b.coeffs().into_iter())
-            .map(|(a, b)| self.config.range.gate().select(ctx, a, b, Existing(sel)))
+            .map(|(a, b)| self.gate().select(ctx, a, b, Existing(sel)))
             .collect();
         AssignedExtensionValue::construct(coeffs)
     }
@@ -320,11 +298,8 @@ where
         let out = [a_coeffs_0, a_coeffs_1]
             .into_iter()
             .map(|coeffs| {
-                self.config.range.gate().select_by_indicator(
-                    ctx,
-                    coeffs.clone(),
-                    indicator.iter().map(|x| x),
-                )
+                self.gate()
+                    .select_by_indicator(ctx, coeffs.clone(), indicator.iter().map(|x| x))
             })
             .collect::<Vec<_>>();
         AssignedExtensionValue::construct(vec![out[0].clone(), out[1].clone()])
@@ -344,16 +319,8 @@ where
             .iter()
             .map(|x| (Existing(&x.coeffs[0]), Existing(&x.coeffs[1])))
             .unzip();
-        let out0 = self
-            .config
-            .range
-            .gate()
-            .inner_product(ctx, a_coeffs_0, b_coeffs_0);
-        let out1 = self
-            .config
-            .range
-            .gate()
-            .inner_product(ctx, a_coeffs_1, b_coeffs_1);
+        let out0 = self.gate().inner_product(ctx, a_coeffs_0, b_coeffs_0);
+        let out1 = self.gate().inner_product(ctx, a_coeffs_1, b_coeffs_1);
         AssignedExtensionValue::construct(vec![out0, out1])
     }
 }

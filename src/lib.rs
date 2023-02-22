@@ -6,7 +6,7 @@ use ff::PrimeField;
 use halo2_base::{
     gates::{flex_gate::FlexGateConfig, range::RangeConfig, GateInstructions},
     AssignedValue, Context, ContextParams,
-    QuantumCell::{self, Constant, Existing, Witness},
+    QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{
     arithmetic::{best_fft, Extendable, Field, FieldExt, FieldExtension},
@@ -454,7 +454,7 @@ where
             2 => {
                 let main_chip = self.gate();
                 let extension = self.extension();
-                let x_inv = self.invert(ctx, Existing(x));
+                let x_inv = main_chip.invert(ctx, Existing(x));
                 let xomega = extension.mul_base(ctx, ExistingExt(&alpha), Existing(&x_inv));
                 let xomega_neg = extension.negate(ctx, ExistingExt(&xomega));
                 let add =
@@ -646,45 +646,13 @@ where
         }
         Ok(product)
     }
-
-    /// Compute the inverse of a value in the field
-    /// TODO: This gate instruction should be merged into halo2-base
-    fn invert<'v>(
-        &self,
-        ctx: &mut Context<'_, F>,
-        a: QuantumCell<'_, 'v, F>,
-    ) -> AssignedValue<'v, F> {
-        let zero = F::zero();
-        let one = F::one();
-        let b = a.value().map(|x| x.invert().unwrap_or(zero));
-        let c = a.value().zip(b).map(|(av, bv)| one - *av * bv);
-        // constrain a * c == 0
-        let cells: Vec<QuantumCell<F>> = vec![
-            Constant(F::from(0)),
-            a.clone(),
-            Witness(c.clone()),
-            Constant(F::from(0)),
-        ];
-        let assigned_cells = self
-            .gate()
-            .assign_region_smart(ctx, cells, vec![0], vec![], vec![]);
-        let c = &assigned_cells[2];
-        // constrain a * b + c == 1
-        let cells: Vec<QuantumCell<F>> =
-            vec![Existing(c), a.clone(), Witness(b.clone()), Constant(one)];
-        let assigned_cells = self
-            .gate()
-            .assign_region_smart(ctx, cells, vec![0], vec![], vec![]);
-        let inv = assigned_cells[2].clone();
-        inv
-    }
 }
 
 // CIRCUIT
 // =========================================================================
 
-const K: usize = 20;
-const NUM_ADVICE: usize = 50;
+const K: usize = 19;
+const NUM_ADVICE: usize = 100;
 
 #[derive(Clone)]
 struct FriVerifierCircuit<
@@ -822,6 +790,8 @@ where
                 verifier_chip.verify_proof(&mut ctx, &hasher_chip, &mut public_coin_chip)?;
 
                 config.extension.range().finalize(&mut ctx);
+
+                ctx.print_stats(&["Range"]);
 
                 Ok(())
             },

@@ -145,6 +145,7 @@ struct VerifierChipConfig<const D: usize, F: FieldExt + Extendable<D>, E: Extens
 {
     pub instance: Column<Instance>,
     pub extension: E,
+    pub challenges: Vec<Challenge>,
     _marker: PhantomData<F>,
 }
 
@@ -159,6 +160,7 @@ struct VerifierChip<
 > {
     config: VerifierChipConfig<D, F, E>,
     proof: FriProofAssigned<'a, D, F, H>,
+    tau: Vec<Value<F>>,
     _marker: PhantomData<C>,
 }
 
@@ -172,10 +174,12 @@ where
     fn new(
         config: VerifierChipConfig<D, F, E>,
         proof: FriProofAssigned<'a, D, F, H>,
+        tau: Vec<Value<F>>,
     ) -> Result<Self, Error> {
         Ok(Self {
             config,
             proof,
+            tau,
             _marker: PhantomData,
         })
     }
@@ -185,11 +189,17 @@ where
         instance: Column<Instance>,
     ) -> VerifierChipConfig<D, F, E> {
         // TODO: These parameters should be read from file or command line input
-        let extension_config = ExtensionFieldConfig::configure(meta, NUM_ADVICE, K);
+        let extension_config = ExtensionFieldConfig::configure(meta, &NUM_ADVICE, K);
         let extension = E::construct(extension_config);
+
+        let challenges = (0..D)
+            .map(|_| meta.challenge_usable_after(FirstPhase))
+            .collect::<Vec<_>>();
+
         VerifierChipConfig {
             instance,
             extension,
+            challenges,
             _marker: PhantomData,
         }
     }
@@ -486,31 +496,11 @@ where
         remainder_polynomial: &[AssignedExtensionValue<'v, F>],
         max_degree: usize,
     ) -> Result<(), Error> {
-        // Use the commitment to the remainder polynomial and evaluations to draw a random
-        // field element tau
-        // TODO: Should we use the multi-phase constraint system to draw the randomness
-        // instead here? Is it cheaper?
-        let mut contents = remainder_polynomial
-            .iter()
-            .flat_map(|x| x.coeffs())
-            .collect::<Vec<_>>();
-        contents.extend(
-            self.proof
-                .layer_commitments
-                .last()
-                .unwrap()
-                .to_assigned()
-                .to_vec(),
-        );
-        let tau = hasher_chip.hash_elements(ctx, self.gate(), &contents)?;
-        // TODO: Refactor this call to be less verbose... Also remove requirement to
-        // call 'to_vec' after calling 'to_assigned'
+        // Draw a random field element tau using challenge randomness
+        self.range().finalize(ctx);
+        ctx.next_phase();
         let tau = AssignedExtensionValue::construct(
-            tau.to_assigned()
-                .to_vec()
-                .into_iter()
-                .take(F::Extension::NUM_BASE_ELEMENTS)
-                .collect::<Vec<_>>(),
+            self.gate().assign_witnesses(ctx, self.tau.iter().cloned()),
         );
 
         // Evaluate both polynomial representations at tau and confirm agreement
@@ -652,7 +642,7 @@ where
 // =========================================================================
 
 const K: usize = 19;
-const NUM_ADVICE: usize = 100;
+const NUM_ADVICE: [usize; 2] = [100, 10];
 
 #[derive(Clone)]
 struct FriVerifierCircuit<
@@ -718,6 +708,13 @@ where
     ) -> Result<(), Error> {
         let using_simple_floor_planner = true;
         let mut first_pass = true;
+
+        let tau = config
+            .challenges
+            .iter()
+            .cloned()
+            .map(|c| layouter.get_challenge(c))
+            .collect::<Vec<_>>();
 
         layouter.assign_region(
             || "gate",
@@ -786,7 +783,7 @@ where
 
                 // Initialize and run verifier chip
                 let verifier_chip =
-                    VerifierChip::<N, D, F, E, H, C>::new(config.clone(), fri_proof)?;
+                    VerifierChip::<N, D, F, E, H, C>::new(config.clone(), fri_proof, tau.clone())?;
                 verifier_chip.verify_proof(&mut ctx, &hasher_chip, &mut public_coin_chip)?;
 
                 config.extension.range().finalize(&mut ctx);

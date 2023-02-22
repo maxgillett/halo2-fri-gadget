@@ -111,7 +111,7 @@ fn test_mock_verify_winter_fp64() {
     // Fri parameters
     let folding_factor = 2;
     let num_queries = 28;
-    let max_remainder_degree = 16;
+    let max_remainder_degree = 128;
 
     let (layer_commitments, queries, remainder) =
         prepare_fri_winter_input::<2, Fp, F64, QuadExtension<FP64>, PoseidonFp64>(
@@ -160,7 +160,7 @@ fn test_mock_verify_winter_bn254() {
     // Fri parameters
     let folding_factor = 2;
     let num_queries = 28;
-    let max_remainder_degree = 16;
+    let max_remainder_degree = 128;
 
     let (layer_commitments, queries, remainder) =
         prepare_fri_winter_input::<1, Fr, BN254, BN254, PoseidonBn254>(

@@ -13,7 +13,7 @@ curves = { git = "https://github.com/maxgillett/halo2-ce", branch = "feat/goldil
 pasta_curves = { git = "https://github.com/maxgillett/halo2-ce", branch = "feat/goldilocks" }
 goldilocks = { git = "https://github.com/maxgillett/halo2-ce", branch = "feat/goldilocks" }
 
-halo2-base = { git = "https://github.com/maxgillett/halo2-lib", branch = "feat/invert" }
+halo2-base = { git = "https://github.com/maxgillett/halo2-lib", branch = "feat/invert", features = ["display"] }
 
 poseidon = { git = "https://github.com/maxgillett/poseidon", branch = "feat/goldilocks" }
 
@@ -24,10 +24,10 @@ lazy_static = "1.4.0"
 rand_core = { version = "0.6", default-features = false }
 
 [dev-dependencies]
-winter-fri = { git = "https://github.com/Nashtare/winterfell", branch = "fix-as_int" }
-winter-math = { git = "https://github.com/Nashtare/winterfell", branch = "fix-as_int" }
-winter-crypto = { git = "https://github.com/Nashtare/winterfell", branch = "fix-as_int" }
-winter-utils = { git = "https://github.com/Nashtare/winterfell", branch = "fix-as_int" }
+winter-fri = { git = "https://github.com/maxgillett/winterfell.git", tag = "v0.4.2-patched" }
+winter-math = { git = "https://github.com/maxgillett/winterfell.git", tag = "v0.4.2-patched" }
+winter-crypto = { git = "https://github.com/maxgillett/winterfell.git", tag = "v0.4.2-patched" }
+winter-utils = { git = "https://github.com/maxgillett/winterfell.git", tag = "v0.4.2-patched" }
 
 uint = "0.9.3"
 serde = { version = "1.0", default-features = false }

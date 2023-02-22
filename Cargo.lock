@@ -892,7 +892,7 @@ checksum = "f40009d85759725a34da6d89a94e63d7bdc50a862acf0dbc7c8e488f1edcb6f5"
 [[package]]
 name = "winter-crypto"
 version = "0.4.2"
-source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "blake3",
  "sha3",
@@ -903,7 +903,7 @@ dependencies = [
 [[package]]
 name = "winter-fri"
 version = "0.4.2"
-source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "winter-crypto",
  "winter-math",
@@ -913,7 +913,7 @@ dependencies = [
 [[package]]
 name = "winter-math"
 version = "0.4.2"
-source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 dependencies = [
  "winter-utils",
 ]
@@ -921,7 +921,7 @@ dependencies = [
 [[package]]
 name = "winter-utils"
 version = "0.4.2"
-source = "git+https://github.com/Nashtare/winterfell?branch=fix-as_int#97076b0413edbcec2dddd731fe694b40eb434826"
+source = "git+https://github.com/maxgillett/winterfell.git?tag=v0.4.2-patched#81f145412abf89daee36406205de228e390441b0"
 
 [[package]]
 name = "wyz"
